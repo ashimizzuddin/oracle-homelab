@@ -4,11 +4,21 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class ContactInfo(BaseModel):
-    emails: list[str] = Field(default_factory=list)
-    phone_numbers: list[str] = Field(default_factory=list)
-    whatsapp: list[str] = Field(default_factory=list)
-    telegram_handles: list[str] = Field(default_factory=list)
-    other: list[str] = Field(default_factory=list)
+    emails: list[str] | None = Field(default_factory=list)
+    phone_numbers: list[str] | None = Field(default_factory=list)
+    whatsapp: list[str] | None = Field(default_factory=list)
+    telegram_handles: list[str] | None = Field(default_factory=list)
+    other: list[str] | None = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_null_lists(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        for field in ["emails", "phone_numbers", "whatsapp", "telegram_handles", "other"]:
+            if field in data and data[field] is None:
+                data[field] = []
+        return data
 
 
 class JobExtractionResult(BaseModel):
@@ -16,20 +26,20 @@ class JobExtractionResult(BaseModel):
     title: str | None = None
     company: str | None = None
     location: str | None = None
-    workplace_type: str = "unknown"
-    employment_type: str = "unknown"
-    experience_level: str = "not_specified"
+    workplace_type: str | None = "unknown"
+    employment_type: str | None = "unknown"
+    experience_level: str | None = "not_specified"
     min_years_exp: int | None = None
     experience_required: str | None = None  # "required"|"preferred"|"plus"|null
     salary_min: float | None = None
     salary_max: float | None = None
-    salary_currency: str = "IDR"
-    salary_period: str = "monthly"
+    salary_currency: str | None = "IDR"
+    salary_period: str | None = "monthly"
     salary_raw: str | None = None
-    skills_required: list[str] = []
-    skills_preferred: list[str] = []
-    requirements_raw: list[str] = []
-    contacts: ContactInfo = Field(default_factory=ContactInfo)
+    skills_required: list[str] | None = Field(default_factory=list)
+    skills_preferred: list[str] | None = Field(default_factory=list)
+    requirements_raw: list[str] | None = Field(default_factory=list)
+    contacts: ContactInfo | None = Field(default_factory=ContactInfo)
     application_url: str | None = None
     summary: str | None = None
     deadline: str | None = None
@@ -46,6 +56,10 @@ class JobExtractionResult(BaseModel):
             "employment_type": "unknown",
             "salary_currency": "IDR",
             "salary_period": "monthly",
+            "skills_required": [],
+            "skills_preferred": [],
+            "requirements_raw": [],
+            "contacts": {},
         }
 
         for field, default_val in defaults.items():

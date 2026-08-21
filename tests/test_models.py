@@ -153,3 +153,62 @@ def test_title_validation_non_job_empty_allowed():
     job = JobExtractionResult.model_validate({"is_job_posting": False, "title": ""})
     assert job.is_job_posting is False
     assert job.title == ""
+
+
+def test_groq_nullability_regression():
+    from ai_job_filter.models.job import JobExtractionResult
+
+    # Simulate a strict structured output where the LLM provides nulls
+    data = {
+        "is_job_posting": True,
+        "title": "Engineer",
+        "workplace_type": None,
+        "employment_type": None,
+        "experience_level": None,
+        "salary_currency": None,
+        "salary_period": None,
+        "skills_required": None,
+        "skills_preferred": None,
+        "requirements_raw": None,
+        "contacts": {
+            "emails": None,
+            "phone_numbers": None,
+            "whatsapp": None,
+            "telegram_handles": None,
+            "other": None,
+        },
+    }
+
+    job = JobExtractionResult.model_validate(data)
+
+    # Assert scalars were safely defaulted
+    assert job.workplace_type == "unknown"
+    assert job.employment_type == "unknown"
+    assert job.experience_level == "not_specified"
+    assert job.salary_currency == "IDR"
+    assert job.salary_period == "monthly"
+
+    # Assert lists were safely defaulted
+    assert job.skills_required == []
+    assert job.skills_preferred == []
+    assert job.requirements_raw == []
+
+    # Assert nested ContactInfo was safely defaulted
+    assert job.contacts.emails == []
+    assert job.contacts.phone_numbers == []
+    assert job.contacts.whatsapp == []
+    assert job.contacts.telegram_handles == []
+    assert job.contacts.other == []
+
+
+def test_groq_nullability_regression_contacts_null():
+    from ai_job_filter.models.job import JobExtractionResult
+
+    # Simulate when the whole contacts block is null
+    data = {"is_job_posting": True, "title": "Engineer", "contacts": None}
+
+    job = JobExtractionResult.model_validate(data)
+
+    # Assert contacts was replaced with default ContactInfo
+    assert job.contacts is not None
+    assert job.contacts.emails == []
