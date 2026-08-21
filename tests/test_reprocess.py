@@ -174,3 +174,26 @@ async def test_not_job_tracking(setup_db, mock_pipelines):
     # No jobs row created
     async with conn.execute("SELECT COUNT(*) FROM jobs") as c:
         assert (await c.fetchone())[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_message_id_selector(setup_db, mock_pipelines):
+    conn = setup_db
+    extractor, vision, scorer = mock_pipelines
+
+    # We know the DB has msg_id=1,2,3 with telegram_msg_id=100,101,102
+    # msg_id=2 has retry_count=3, so without --force it skips
+    stats_limit = await reprocess_failed_messages(
+        conn, Settings(), extractor, vision, scorer, execute=False, message_id=2
+    )
+    assert stats_limit.candidates_found == 1
+    assert stats_limit.skipped_limit == 1
+    assert stats_limit.success == 0
+
+    # msg_id=1 has retry_count=0
+    stats_success = await reprocess_failed_messages(
+        conn, Settings(), extractor, vision, scorer, execute=False, message_id=1
+    )
+    assert stats_success.candidates_found == 1
+    assert stats_success.success == 1
+    assert stats_success.skipped_limit == 0

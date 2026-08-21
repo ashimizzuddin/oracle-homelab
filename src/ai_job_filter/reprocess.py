@@ -36,13 +36,23 @@ async def reprocess_failed_messages(
     limit: int | None = None,
     force: bool = False,
     execute: bool = False,
+    message_id: int | None = None,
 ) -> ReprocessStats:
     stats = ReprocessStats(mode="EXECUTE" if execute else "DRY RUN")
     repo = Repository(conn)
 
-    async with conn.execute(
-        "SELECT * FROM messages WHERE processing_status IN ('EXTRACTION_FAILED', 'VISION_FAILED') ORDER BY posted_at ASC"
-    ) as cursor:
+    query = (
+        "SELECT * FROM messages WHERE processing_status IN ('EXTRACTION_FAILED', 'VISION_FAILED')"
+    )
+    params = []
+
+    if message_id is not None:
+        query += " AND id = ?"
+        params.append(message_id)
+
+    query += " ORDER BY posted_at ASC"
+
+    async with conn.execute(query, params) as cursor:
         rows = await cursor.fetchall()
 
     stats.candidates_found = len(rows)

@@ -47,9 +47,7 @@ class Scorer:
                 matched_skills += 1
 
         if len(req_skills) > 0:
-            skill_score = min(
-                25, (matched_skills / max(1, len(req_skills))) * 25 * 1.5
-            )  # generous scaling
+            skill_score = min(25, matched_skills * 6)
             score += skill_score
 
         # Certifications are not experience, but they are skills.
@@ -70,16 +68,26 @@ class Scorer:
         # 5. Career trajectory (0-15)
         traj_score = 0
         summary_norm = (job.summary or "").lower() + " " + " ".join(job.requirements_raw).lower()
-        for td in self.profile.career_direction:
-            if td.lower() in summary_norm or td.lower() in job_title_norm:
-                traj_score = 15
-                break
+
+        # V2: fuzzy match on title using token_set_ratio
+        best_title_tsr = 0
+        if self.profile.career_direction:
+            best_title_tsr = max(
+                fuzz.token_set_ratio(job_title_norm, cd.lower())
+                for cd in self.profile.career_direction
+            )
+
+        # V1 fallback: exact substring match in summary/requirements
+        summary_match = any(cd.lower() in summary_norm for cd in self.profile.career_direction)
+
+        if best_title_tsr >= 75 or summary_match:
+            traj_score = 15
         score += traj_score
 
         # 6. Practical factors (0-10) (workplace type, etc)
         if job.workplace_type in ["remote", "hybrid", "on-site"]:
             score += 5
-        if job.salary_min is not None:
+        if job.salary_min is not None or job.salary_max is not None:
             score += 5
 
         final_score = min(100, int(score))

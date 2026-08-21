@@ -34,7 +34,11 @@ async def main():
     )
     parser.add_argument("--force", action="store_true", help="Bypass retry_count limit")
     parser.add_argument("--limit", type=int, help="Maximum number of candidates to process")
+    parser.add_argument("--message-id", type=int, help="Process only this specific message ID")
     args = parser.parse_args()
+
+    if args.message_id is not None and args.limit is not None:
+        parser.error("--message-id and --limit cannot be used together")
 
     if not args.execute:
         logger.info("DRY RUN: no database mutations. LLM/API calls may still occur.")
@@ -68,6 +72,7 @@ async def main():
             limit=args.limit,
             force=args.force,
             execute=args.execute,
+            message_id=args.message_id,
         )
 
         logger.info(
