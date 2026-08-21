@@ -10,9 +10,12 @@ from dotenv import load_dotenv
 # Add src to path so we can import ai_job_filter
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
+import contextlib
+
 from ai_job_filter.config import Settings
+from ai_job_filter.models.candidate import CandidateProfile
 from ai_job_filter.processing.extractor import ExtractorPipeline
-from ai_job_filter.processing.scorer import CandidateScorer
+from ai_job_filter.processing.scorer import Scorer
 from ai_job_filter.processing.vision import VisionPipeline
 from ai_job_filter.providers.gemini_provider import GeminiProvider
 from ai_job_filter.providers.groq_provider import GroqProvider
@@ -47,7 +50,12 @@ async def main():
 
     extractor = ExtractorPipeline(groq_provider)
     vision = VisionPipeline(gemini_provider)
-    scorer = CandidateScorer(settings)
+    profile = CandidateProfile()
+    with contextlib.suppress(Exception):
+        profile = CandidateProfile.from_yaml("candidate_profile.yaml")
+    scorer = Scorer(
+        profile, min_apply=settings.min_score_apply, min_review=settings.min_score_review
+    )
 
     async with aiosqlite.connect(settings.database_path) as conn:
         conn.row_factory = aiosqlite.Row
