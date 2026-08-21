@@ -78,7 +78,7 @@ Local SQLite with WAL mode. Tables:
 * Telegram user session credentials must be treated as equivalent to full account credentials.
 
 ## 15. Current Implementation Status
-**Planning Phase Complete. Application code has NOT been implemented yet.** Architecture Decision Record v1.1 has been drafted and mostly approved.
+**Phase 1 Implementation Complete.** The offline project foundation and local processing modules (SQLite, regex detection, dHash/SHA-256 deduplication, rule-based scoring, config, and models) are fully implemented. 19/19 offline unit tests pass, and Ruff checks are clean. There is **no real API or network integration yet** (Telegram, Groq, and Gemini modules are currently Phase 1 stubs).
 
 ## 16. Decisions Already Made
 * SQLite over external databases.
@@ -86,6 +86,9 @@ Local SQLite with WAL mode. Tables:
 * Free-first local and API processing over paid solutions.
 * Direct Groq/Gemini SDKs over LiteLLM.
 * Deterministic rule-based scoring over LLM-based scoring.
+* Gemini 2.5 Flash as the vision model (free-tier limits are assumptions, not guarantees — verify per-account).
+* Strict job-level dedup: normalized title + company + location (all three required). Application URL as supporting signal only for vacancy-specific URLs; generic career pages excluded.
+* Static provider selection for MVP (`TEXT_PROVIDER=groq`, `VISION_PROVIDER=gemini`). No automatic cross-provider fallback. Quota exhaustion → `PENDING_AI` / `PENDING_VISION`.
 
 ## 17. Decisions Still Unresolved
 * Final list of specific Telegram channels/groups to monitor.
@@ -96,9 +99,8 @@ Local SQLite with WAL mode. Tables:
 * Groq token limits on the free tier (mitigated by local filtering and queuing).
 
 ## 19. Exact Next Step
-1. Finalize ADR v1.2 if needed (applying the last 3 corrections: Gemini 2.5 Flash, strict Job-Level Dedup with location/url, and static provider selection with NO cross-provider fallback).
-2. Approve the final architecture.
-3. Begin Phase 1 MVP implementation (setting up the project structure, `uv init`, database schema, and initial Telegram ingestion).
+1. ~~Phase 1 MVP implementation~~ ✅ **Done** — Offline foundation and local pipelines established.
+2. **Begin Phase 2: Provider Implementation & Prompt Engineering.** Implement `GroqProvider.extract_job()` and `GeminiProvider.extract_from_image()` using the respective SDKs. Develop system prompts to enforce Pydantic structured output mapping to `JobExtractionResult`. Add `@pytest.mark.integration` tests to verify extractions against real API calls.
 
 ## 20. Instructions for the Next Antigravity Agent
-Welcome! When you read this, do not rewrite the architecture. Start by examining the ADR, then propose the Phase 1 implementation plan based on the next steps above. **Do not implement code without user approval of the plan.**
+Welcome! When you read this, do not rewrite the architecture. Start by examining `docs/architecture-decision-record-v1.2.md`, then propose the Phase 2 implementation plan based on the next steps above. **Do not implement code without user approval of the plan.**

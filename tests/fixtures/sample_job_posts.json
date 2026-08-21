@@ -1,0 +1,21 @@
+[
+  {
+    "is_job_posting": true,
+    "title": "Junior Linux Administrator",
+    "company": "TechCorp",
+    "location": "Jakarta",
+    "workplace_type": "on-site",
+    "employment_type": "full-time",
+    "experience_level": "entry_level",
+    "min_years_exp": 0,
+    "experience_required": "preferred",
+    "salary_min": 5000000,
+    "salary_max": 8000000,
+    "salary_currency": "IDR",
+    "salary_period": "monthly",
+    "skills_required": ["Linux", "Bash", "Networking"],
+    "skills_preferred": ["RHCSA", "VMware"],
+    "summary": "Looking for a junior admin to manage our Linux infrastructure.",
+    "application_url": "https://techcorp.com/vacancies/123"
+  }
+]
