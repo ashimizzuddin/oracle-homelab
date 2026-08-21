@@ -118,6 +118,13 @@ class Repository:
         self, job_id: int, chat_id: int, bot_message_id: int | None = None
     ) -> int:
         async with self.conn.execute(
+            "SELECT id FROM notifications WHERE job_id = ?", (job_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return 0  # Already notified
+
+        async with self.conn.execute(
             "INSERT INTO notifications (job_id, chat_id, bot_message_id) VALUES (?, ?, ?)",
             (job_id, chat_id, bot_message_id),
         ) as cursor:
