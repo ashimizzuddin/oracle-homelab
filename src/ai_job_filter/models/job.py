@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class JobExtractionResult(BaseModel):
@@ -23,3 +23,43 @@ class JobExtractionResult(BaseModel):
     application_url: str | None = None
     summary: str | None = None
     deadline: str | None = None
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> "JobExtractionResult":
+        if not self.is_job_posting:
+            return self
+
+        if self.min_years_exp is not None and self.min_years_exp < 0:
+            raise ValueError("min_years_exp must be >= 0")
+
+        if (
+            self.salary_min is not None
+            and self.salary_max is not None
+            and self.salary_min > self.salary_max
+        ):
+            raise ValueError("salary_min cannot be greater than salary_max")
+
+        if self.experience_required not in [None, "required", "preferred", "plus"]:
+            raise ValueError(f"Invalid experience_required: {self.experience_required}")
+
+        # Clean up common hallucinations
+        for field in [
+            "company",
+            "location",
+            "salary_raw",
+            "application_url",
+            "summary",
+            "deadline",
+        ]:
+            val = getattr(self, field)
+            if isinstance(val, str) and val.strip().lower() in [
+                "null",
+                "not specified",
+                "n/a",
+                "unknown",
+                "none",
+                "not stated",
+            ]:
+                setattr(self, field, None)
+
+        return self
