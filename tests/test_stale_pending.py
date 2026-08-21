@@ -214,3 +214,34 @@ async def test_existing_failed_behavior_remains_unchanged(
     repo = Repository(mem_db)
     msg = await repo.get_message(msg_id)
     assert dict(msg)["processing_status"] == "PROCESSED"
+
+
+@pytest.mark.asyncio
+async def test_regression_message_113_equivalent(
+    mem_db, settings, mock_extractor, mock_vision, mock_scorer
+):
+    """
+    Regression test requested by user:
+    message_id=113 equivalent: PENDING + old scraped_at + --message-id must be eligible.
+    """
+    repo = Repository(mem_db)
+    source_id = await repo.insert_source(12345, "Test Group")
+    # Insert explicitly with ID 113
+    await mem_db.execute(
+        "INSERT INTO messages (id, source_id, telegram_msg_id, raw_text, posted_at, processing_status, scraped_at) "
+        "VALUES (113, ?, 927, 'test', '2026-08-21T21:17:58Z', 'PENDING', datetime('now', '-30 minutes'))",
+        (source_id,),
+    )
+    await mem_db.commit()
+
+    mock_extractor.run.return_value = (get_job_result(), "PROCESSED")
+
+    stats = await reprocess_failed_messages(
+        mem_db, settings, mock_extractor, mock_vision, mock_scorer, message_id=113, execute=True
+    )
+
+    assert stats.candidates_found == 1
+    assert stats.eligible == 1
+
+    msg = await repo.get_message(113)
+    assert dict(msg)["processing_status"] == "PROCESSED"
