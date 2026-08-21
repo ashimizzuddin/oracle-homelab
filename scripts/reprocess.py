@@ -78,6 +78,7 @@ async def main():
             skipped_limit=stats.skipped_limit,
             skipped_media=stats.skipped_media,
             success=stats.success,
+            not_job=stats.not_job,
             failed=stats.failed,
         )
 

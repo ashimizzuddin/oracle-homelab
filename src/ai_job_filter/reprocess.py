@@ -22,6 +22,7 @@ class ReprocessStats:
     skipped_limit: int = 0
     skipped_media: int = 0
     success: int = 0
+    not_job: int = 0
     failed: int = 0
     mode: str = "DRY RUN"
 
@@ -96,7 +97,7 @@ async def reprocess_failed_messages(
                 # Memory transformations
                 if execute:
                     job_id, _score, _classification = await score_and_save_job(
-                        repo, scorer, msg_id, source_id, raw_text, job_result
+                        repo, scorer, msg_id, source_id, raw_text or "", job_result
                     )
                     await conn.execute(
                         "UPDATE messages SET processing_status = ?, skip_reason = NULL, retry_count = 0 WHERE id = ?",
@@ -110,6 +111,11 @@ async def reprocess_failed_messages(
                     )
 
                 stats.success += 1
+            elif new_status == "NOT_JOB":
+                stats.not_job += 1
+                logger.info("Not a job posting", msg_id=msg_id)
+                if execute:
+                    await repo.update_message_status(msg_id, ProcessingStatus.NOT_JOB.value, None)
             else:
                 # Still failed
                 raise Exception(f"Pipeline returned {new_status}")

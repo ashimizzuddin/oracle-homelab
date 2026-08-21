@@ -148,3 +148,32 @@ async def test_transient_failure_storage(setup_db, mock_pipelines):
         row = await c.fetchone()
         assert row[0] == 1  # Incremented
         assert row[1] == "provider_transient_error"  # Concise string
+
+
+@pytest.mark.asyncio
+async def test_not_job_tracking(setup_db, mock_pipelines):
+    conn = setup_db
+    extractor, vision, scorer = mock_pipelines
+
+    # Make the extractor return NOT_JOB
+    extractor.run.return_value = (None, "NOT_JOB")
+
+    stats = await reprocess_failed_messages(
+        conn, Settings(), extractor, vision, scorer, execute=True
+    )
+
+    assert stats.not_job == 1
+    assert stats.success == 0
+    assert stats.failed == 0
+
+    # NOT_JOB must NOT increment retry_count
+    async with conn.execute(
+        "SELECT processing_status, retry_count FROM messages WHERE telegram_msg_id = 100"
+    ) as c:
+        row = await c.fetchone()
+        assert row[0] == "NOT_JOB"
+        assert row[1] == 0  # Unchanged
+
+    # No jobs row created
+    async with conn.execute("SELECT COUNT(*) FROM jobs") as c:
+        assert (await c.fetchone())[0] == 0

@@ -40,7 +40,10 @@ class ExtractorPipeline:
                 try:
                     result_dict = await self._extract_with_retry(text)
                     if result_dict:
-                        return JobExtractionResult(**result_dict), "PROCESSED"
+                        job = JobExtractionResult(**result_dict)
+                        if not job.is_job_posting:
+                            return None, "NOT_JOB"
+                        return job, "PROCESSED"
                     return None, "EXTRACTION_FAILED"
                 except ProviderExtractionError as e:
                     logger.warning(f"Extraction attempt {attempt + 1} failed: {e}")

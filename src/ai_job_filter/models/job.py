@@ -13,7 +13,7 @@ class ContactInfo(BaseModel):
 
 class JobExtractionResult(BaseModel):
     is_job_posting: bool
-    title: str = ""
+    title: str | None = None
     company: str | None = None
     location: str | None = None
     workplace_type: str = "unknown"
@@ -59,6 +59,9 @@ class JobExtractionResult(BaseModel):
     def validate_semantics(self) -> "JobExtractionResult":
         if not self.is_job_posting:
             return self
+
+        if not self.title or not self.title.strip():
+            raise ValueError("is_job_posting is True but title is empty")
 
         if self.min_years_exp is not None and self.min_years_exp < 0:
             raise ValueError("min_years_exp must be >= 0")

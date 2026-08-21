@@ -34,7 +34,10 @@ class VisionPipeline:
                 try:
                     result_dict = await self._extract_with_retry(image_path, caption)
                     if result_dict:
-                        return JobExtractionResult(**result_dict), "PROCESSED"
+                        job = JobExtractionResult(**result_dict)
+                        if not job.is_job_posting:
+                            return None, "NOT_JOB"
+                        return job, "PROCESSED"
                     return None, "VISION_FAILED"
                 except ProviderExtractionError as e:
                     logger.warning(f"Vision extraction attempt {attempt + 1} failed: {e}")

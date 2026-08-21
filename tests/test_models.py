@@ -109,3 +109,47 @@ def test_null_normalization():
     # Genuine nullables must remain None
     assert job.salary_min is None
     assert job.location is None
+
+
+def test_title_validation_valid():
+    """Valid job with non-empty title is accepted."""
+    job = JobExtractionResult.model_validate({"is_job_posting": True, "title": "DevOps Engineer"})
+    assert job.title == "DevOps Engineer"
+
+
+def test_title_validation_null_rejected():
+    """is_job_posting=True with title=None is rejected."""
+    import pytest
+
+    with pytest.raises(ValueError, match="title is empty"):
+        JobExtractionResult.model_validate({"is_job_posting": True, "title": None})
+
+
+def test_title_validation_empty_rejected():
+    """is_job_posting=True with title='' is rejected."""
+    import pytest
+
+    with pytest.raises(ValueError, match="title is empty"):
+        JobExtractionResult.model_validate({"is_job_posting": True, "title": ""})
+
+
+def test_title_validation_whitespace_rejected():
+    """is_job_posting=True with title='   ' is rejected."""
+    import pytest
+
+    with pytest.raises(ValueError, match="title is empty"):
+        JobExtractionResult.model_validate({"is_job_posting": True, "title": "   "})
+
+
+def test_title_validation_non_job_null_allowed():
+    """is_job_posting=False with title=None is allowed."""
+    job = JobExtractionResult.model_validate({"is_job_posting": False, "title": None})
+    assert job.is_job_posting is False
+    assert job.title is None
+
+
+def test_title_validation_non_job_empty_allowed():
+    """is_job_posting=False with empty title is allowed."""
+    job = JobExtractionResult.model_validate({"is_job_posting": False, "title": ""})
+    assert job.is_job_posting is False
+    assert job.title == ""
