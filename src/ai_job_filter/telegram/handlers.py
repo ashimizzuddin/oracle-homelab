@@ -5,10 +5,10 @@ import structlog
 from telethon.tl.types import Message
 
 from ..models.enums import ProcessingStatus
-from ..processing.dedup import check_job_level_duplicate
 from ..processing.detector import is_potential_job
 from ..processing.image_hash import compute_dhash, compute_sha256, hamming_distance
 from ..processing.normalizer import compute_text_hash
+from ..processing.pipeline import score_and_save_job
 
 logger = structlog.get_logger()
 
@@ -122,36 +122,16 @@ class MessageHandler:
         if status != "PROCESSED" or not job_result:
             return
 
-        # 6. Job-Level Dedup (Tier 3)
-        recent_jobs = [dict(row) for row in await self.db_repo.find_recent_jobs(30)]
-        duplicate_parent = check_job_level_duplicate(job_result.model_dump(), recent_jobs)
-
-        is_dup = 1 if duplicate_parent else 0
-        parent_id = duplicate_parent["id"] if duplicate_parent else None
-
-        # 7. Scoring
-        score, classification, _ = self.scorer.score_job(job_result)
-
-        # 8. Save Job
-        job_id = await self.db_repo.insert_job(
-            message_id=msg_id,
-            source_id=source_id,
-            title=job_result.title,
-            content_hash=content_hash,
-            match_score=score,
-            classification=classification.value,
-            company=job_result.company,
-            location=job_result.location,
-            salary_min=job_result.salary_min,
-            salary_max=job_result.salary_max,
-            application_url=job_result.application_url,
-            summary=job_result.summary,
-            is_duplicate=is_dup,
-            parent_job_id=parent_id,
+        # 6. Score and Save Job
+        job_id, score, classification = await score_and_save_job(
+            self.db_repo, self.scorer, msg_id, source_id, raw_text, job_result
         )
 
         logger.info(
-            "Processed job", msg_id=msg_id, score=score, classification=classification.value
+            "Processed job",
+            msg_id=msg_id,
+            score=score,
+            classification=classification.value,
         )
 
         return job_id, job_result.model_dump(), classification
