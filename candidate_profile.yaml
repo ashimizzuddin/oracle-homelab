@@ -1,0 +1,38 @@
+professional_years: 0
+certification: "RHCSA"
+strong_technical_areas:
+  - Linux
+  - System Administration
+  - RHEL
+  - Networking
+  - VMware
+  - Virtualization
+  - Kali Linux
+  - Bash
+career_direction:
+  - Cybersecurity
+  - Infrastructure Security
+  - SOC
+  - Penetration Testing
+  - Bug Bounty
+  - Security Engineering
+target_experience:
+  - entry_level
+  - junior
+  - fresh_graduate
+  - 0-1 years
+target_roles:
+  - Junior System Administrator
+  - Linux Administrator
+  - IT Infrastructure
+  - IT Support
+  - NOC
+  - Junior SOC Analyst
+  - Junior Security Analyst
+  - Network Administrator
+  - Junior DevOps
+  - Technical Support
+weaknesses_not_professional_strengths:
+  - Backend Development
+  - Frontend Development
+  - Web Development
