@@ -1,16 +1,22 @@
 import argparse
 import asyncio
+import contextlib
+import os
 import sys
 
 import aiosqlite
 import structlog
 from dotenv import load_dotenv
 
+# Add src to path so we can import ai_job_filter
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+
 from ai_job_filter.config import Settings
 from ai_job_filter.db.repository import Repository
 from ai_job_filter.models.candidate import CandidateProfile
 from ai_job_filter.processing.extractor import ExtractorPipeline
 from ai_job_filter.processing.scorer import Scorer
+from ai_job_filter.providers.groq_provider import GroqProvider
 from ai_job_filter.rebuild import JobRebuilder
 
 logger = structlog.get_logger()
@@ -37,13 +43,26 @@ async def main():
         print("DRY RUN MODE. No mutations will occur.")
 
     settings = Settings()
-    profile = CandidateProfile.from_yaml(settings.candidate_profile_path)
 
-    async with aiosqlite.connect(settings.db_path) as conn:
+    # Load profile exactly like main.py and reprocess.py
+    profile = CandidateProfile()
+    with contextlib.suppress(Exception):
+        profile = CandidateProfile.from_yaml("candidate_profile.yaml")
+
+    # Initialize provider correctly
+    groq_provider = GroqProvider(
+        api_key=settings.groq_api_key.get_secret_value() if settings.groq_api_key else None,
+        model=settings.text_model,
+    )
+    extractor = ExtractorPipeline(groq_provider)
+
+    scorer = Scorer(
+        profile, min_apply=settings.min_score_apply, min_review=settings.min_score_review
+    )
+
+    async with aiosqlite.connect(settings.database_path) as conn:
         conn.row_factory = aiosqlite.Row
         repo = Repository(conn)
-        extractor = ExtractorPipeline(settings)
-        scorer = Scorer(profile)
 
         rebuilder = JobRebuilder(repo, extractor, scorer, args.execute)
 
