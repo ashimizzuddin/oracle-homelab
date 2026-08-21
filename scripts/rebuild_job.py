@@ -16,6 +16,8 @@ from ai_job_filter.db.repository import Repository
 from ai_job_filter.models.candidate import CandidateProfile
 from ai_job_filter.processing.extractor import ExtractorPipeline
 from ai_job_filter.processing.scorer import Scorer
+from ai_job_filter.processing.vision import VisionPipeline
+from ai_job_filter.providers.gemini_provider import GeminiProvider
 from ai_job_filter.providers.groq_provider import GroqProvider
 from ai_job_filter.rebuild import JobRebuilder
 
@@ -56,6 +58,12 @@ async def main():
     )
     extractor = ExtractorPipeline(groq_provider)
 
+    gemini_provider = GeminiProvider(
+        api_key=settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None,
+        model=settings.vision_model,
+    )
+    vision = VisionPipeline(gemini_provider)
+
     scorer = Scorer(
         profile, min_apply=settings.min_score_apply, min_review=settings.min_score_review
     )
@@ -64,7 +72,7 @@ async def main():
         conn.row_factory = aiosqlite.Row
         repo = Repository(conn)
 
-        rebuilder = JobRebuilder(repo, extractor, scorer, args.execute)
+        rebuilder = JobRebuilder(repo, extractor, vision, scorer, args.execute)
 
         result = await rebuilder.rebuild_message(args.message_id, args.force)
 

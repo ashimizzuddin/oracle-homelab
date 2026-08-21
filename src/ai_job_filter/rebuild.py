@@ -6,7 +6,6 @@ from .db.repository import Repository
 from .models.enums import ProcessingStatus
 from .processing.extractor import ExtractorPipeline
 from .processing.pipeline import score_and_update_job
-from .providers.errors import TransientAPIError
 
 logger = structlog.get_logger()
 
@@ -22,9 +21,12 @@ class RebuildResult:
 
 
 class JobRebuilder:
-    def __init__(self, db_repo: Repository, extractor: ExtractorPipeline, scorer, execute: bool):
+    def __init__(
+        self, db_repo: Repository, extractor: ExtractorPipeline, vision, scorer, execute: bool
+    ):
         self.db_repo = db_repo
         self.extractor = extractor
+        self.vision = vision
         self.scorer = scorer
         self.execute = execute
 
@@ -60,21 +62,38 @@ class JobRebuilder:
             current_status=current_status,
         )
 
+        raw_text = msg_dict.get("raw_text", "")
+        media_path = msg_dict.get("media_path")
+        has_media = msg_dict.get("has_media", 0)
+
         try:
-            job_result, _ = await self.extractor.process_message(msg_dict)
-        except TransientAPIError as e:
-            logger.error("rebuild_transient_error", error=str(e))
-            if self.execute:
-                await self.db_repo.update_message_status(
-                    message_id, ProcessingStatus.EXTRACTION_FAILED.value, str(e)
+            if has_media and media_path:
+                job_result, new_status = await self.vision.run(media_path, raw_text)
+            else:
+                job_result, new_status = await self.extractor.run(raw_text)
+
+            if new_status in ("PENDING_AI", "PENDING_VISION"):
+                if self.execute:
+                    await self.db_repo.update_message_status(
+                        message_id, new_status, "transient_api_error_during_rebuild"
+                    )
+                return RebuildResult(
+                    success=False,
+                    error_reason="Transient API Error during rebuild",
+                    status_updated_to=new_status if self.execute else None,
                 )
-            return RebuildResult(
-                success=False,
-                error_reason="Transient API Error",
-                status_updated_to=ProcessingStatus.EXTRACTION_FAILED.value
-                if self.execute
-                else None,
-            )
+
+            if new_status in ("EXTRACTION_FAILED", "VISION_FAILED") or (
+                new_status != "NOT_JOB" and not job_result
+            ):
+                if self.execute:
+                    await self.db_repo.update_message_status(message_id, new_status)
+                return RebuildResult(
+                    success=False,
+                    error_reason=f"Pipeline returned {new_status}",
+                    status_updated_to=new_status if self.execute else None,
+                )
+
         except Exception as e:
             logger.exception("rebuild_fatal_error", error=str(e))
             if self.execute:
@@ -87,7 +106,7 @@ class JobRebuilder:
                 status_updated_to=ProcessingStatus.FAILED.value if self.execute else None,
             )
 
-        if not job_result.is_job_posting:
+        if new_status == "NOT_JOB" or (job_result and not job_result.is_job_posting):
             logger.info("rebuild_not_job", message_id=message_id)
             if self.execute:
                 await self.db_repo.update_message_status(message_id, ProcessingStatus.NOT_JOB.value)

@@ -21,8 +21,15 @@ async def mem_db():
 @pytest.fixture
 def mock_extractor():
     extractor = MagicMock()
-    extractor.process_message = AsyncMock()
+    extractor.run = AsyncMock()
     return extractor
+
+
+@pytest.fixture
+def mock_vision():
+    vision = MagicMock()
+    vision.run = AsyncMock()
+    return vision
 
 
 @pytest.fixture
@@ -59,7 +66,7 @@ def get_job_result():
 
 
 @pytest.mark.asyncio
-async def test_duplicate_relation_safety(mem_db, mock_extractor, mock_scorer):
+async def test_duplicate_relation_safety(mem_db, mock_extractor, mock_vision, mock_scorer):
     # Setup repo and initial data
     repo = Repository(mem_db)
 
@@ -84,8 +91,8 @@ async def test_duplicate_relation_safety(mem_db, mock_extractor, mock_scorer):
     )
 
     # Rebuild job 2 so it is NO LONGER a duplicate
-    mock_extractor.process_message.return_value = (get_job_result(), "test_model")
-    rebuilder = JobRebuilder(repo, mock_extractor, mock_scorer, execute=True)
+    mock_extractor.run.return_value = (get_job_result(), "PROCESSED")
+    rebuilder = JobRebuilder(repo, mock_extractor, mock_vision, mock_scorer, execute=True)
 
     res = await rebuilder.rebuild_message(msg2_id)
     assert res.success is True
@@ -102,15 +109,17 @@ async def test_duplicate_relation_safety(mem_db, mock_extractor, mock_scorer):
 
 
 @pytest.mark.asyncio
-async def test_score_breakdown_persisted_as_empty_dict(mem_db, mock_extractor, mock_scorer):
+async def test_score_breakdown_persisted_as_empty_dict(
+    mem_db, mock_extractor, mock_vision, mock_scorer
+):
     repo = Repository(mem_db)
     source_id = await repo.insert_source(12345, "Test Group")
     msg_id = await repo.insert_message(source_id, 101, "Job", "2023-01-01T12:00:00Z")
     await repo.update_message_status(msg_id, "PROCESSED")
     await repo.insert_job(msg_id, source_id, "Original", "hash", 0.0, "IGNORE")
 
-    mock_extractor.process_message.return_value = (get_job_result(), "test_model")
-    rebuilder = JobRebuilder(repo, mock_extractor, mock_scorer, execute=True)
+    mock_extractor.run.return_value = (get_job_result(), "PROCESSED")
+    rebuilder = JobRebuilder(repo, mock_extractor, mock_vision, mock_scorer, execute=True)
 
     await rebuilder.rebuild_message(msg_id)
     job = await repo.get_job_by_message_id(msg_id)
@@ -120,7 +129,9 @@ async def test_score_breakdown_persisted_as_empty_dict(mem_db, mock_extractor, m
 
 
 @pytest.mark.asyncio
-async def test_message_status_after_rebuild_success(mem_db, mock_extractor, mock_scorer):
+async def test_message_status_after_rebuild_success(
+    mem_db, mock_extractor, mock_vision, mock_scorer
+):
     repo = Repository(mem_db)
     source_id = await repo.insert_source(12345, "Test Group")
     msg_id = await repo.insert_message(source_id, 101, "Job", "2023-01-01T12:00:00Z")
@@ -130,8 +141,8 @@ async def test_message_status_after_rebuild_success(mem_db, mock_extractor, mock
     )
     await repo.insert_job(msg_id, source_id, "Job", "hash", 0.0, "IGNORE")
 
-    mock_extractor.process_message.return_value = (get_job_result(), "test_model")
-    rebuilder = JobRebuilder(repo, mock_extractor, mock_scorer, execute=True)
+    mock_extractor.run.return_value = (get_job_result(), "PROCESSED")
+    rebuilder = JobRebuilder(repo, mock_extractor, mock_vision, mock_scorer, execute=True)
 
     await rebuilder.rebuild_message(msg_id, force=True)
     msg = await repo.get_message(msg_id)
@@ -142,16 +153,17 @@ async def test_message_status_after_rebuild_success(mem_db, mock_extractor, mock
 
 
 @pytest.mark.asyncio
-async def test_message_status_after_rebuild_not_job(mem_db, mock_extractor, mock_scorer):
+async def test_message_status_after_rebuild_not_job(
+    mem_db, mock_extractor, mock_vision, mock_scorer
+):
     repo = Repository(mem_db)
     source_id = await repo.insert_source(12345, "Test Group")
     msg_id = await repo.insert_message(source_id, 101, "Job", "2023-01-01T12:00:00Z")
     await repo.update_message_status(msg_id, "PROCESSED")
     await repo.insert_job(msg_id, source_id, "Job", "hash", 0.0, "IGNORE")
 
-    not_job = JobExtractionResult(is_job_posting=False)
-    mock_extractor.process_message.return_value = (not_job, "test_model")
-    rebuilder = JobRebuilder(repo, mock_extractor, mock_scorer, execute=True)
+    mock_extractor.run.return_value = (None, "NOT_JOB")
+    rebuilder = JobRebuilder(repo, mock_extractor, mock_vision, mock_scorer, execute=True)
 
     await rebuilder.rebuild_message(msg_id)
     msg = await repo.get_message(msg_id)
@@ -164,3 +176,33 @@ async def test_message_status_after_rebuild_not_job(mem_db, mock_extractor, mock
     # and instructions say "do not create/update a jobs row beyond the explicit rebuild semantics")
     job = await repo.get_job_by_message_id(msg_id)
     assert dict(job)["title"] == "Job"  # Unchanged
+
+
+@pytest.mark.asyncio
+async def test_rebuild_dry_run_reaches_pipeline_no_mutation(
+    mem_db, mock_extractor, mock_vision, mock_scorer
+):
+    repo = Repository(mem_db)
+    source_id = await repo.insert_source(12345, "Test Group")
+    msg_id = await repo.insert_message(source_id, 101, "Test dry run text", "2023-01-01T12:00:00Z")
+    await repo.update_message_status(msg_id, "PROCESSED")
+    await repo.insert_job(msg_id, source_id, "Old Title", "hash", 0.0, "IGNORE")
+
+    # Setup mock
+    mock_extractor.run.return_value = (get_job_result(), "PROCESSED")
+
+    rebuilder = JobRebuilder(repo, mock_extractor, mock_vision, mock_scorer, execute=False)
+    res = await rebuilder.rebuild_message(msg_id)
+
+    assert res.success is True
+    assert res.job_updated is False
+
+    # Assert extractor was called with the message text
+    mock_extractor.run.assert_called_once_with("Test dry run text")
+
+    # Assert scorer was called with the mocked extracted job result
+    mock_scorer.score_job.assert_called_once()
+
+    # Assert zero DB mutations happened
+    job = await repo.get_job_by_message_id(msg_id)
+    assert dict(job)["title"] == "Old Title"
