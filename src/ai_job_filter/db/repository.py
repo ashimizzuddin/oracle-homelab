@@ -137,3 +137,33 @@ class Repository:
             (action, notes, notif_id),
         )
         await self.conn.commit()
+
+    async def get_message(self, message_id: int) -> aiosqlite.Row | None:
+        async with self.conn.execute(
+            "SELECT * FROM messages WHERE id = ?", (message_id,)
+        ) as cursor:
+            return await cursor.fetchone()
+
+    async def get_job_by_message_id(self, message_id: int) -> aiosqlite.Row | None:
+        async with self.conn.execute(
+            "SELECT * FROM jobs WHERE message_id = ?", (message_id,)
+        ) as cursor:
+            return await cursor.fetchone()
+
+    async def update_job(self, job_id: int, **kwargs) -> None:
+        if not kwargs:
+            return
+
+        protected = {"id", "message_id", "source_id", "content_hash"}
+        update_cols = {k: v for k, v in kwargs.items() if k not in protected}
+
+        if not update_cols:
+            return
+
+        cols = list(update_cols.keys())
+        set_clause = ", ".join(f"{col} = ?" for col in cols)
+        values = [update_cols[col] for col in cols]
+        values.append(job_id)
+
+        await self.conn.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
+        await self.conn.commit()
