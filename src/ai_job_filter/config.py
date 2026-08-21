@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    stale_pending_minutes: int = 15
 
     # Telegram (Optional for testing)
     telegram_api_id: int | None = None

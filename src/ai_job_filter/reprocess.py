@@ -41,13 +41,22 @@ async def reprocess_failed_messages(
     stats = ReprocessStats(mode="EXECUTE" if execute else "DRY RUN")
     repo = Repository(conn)
 
+    stale_minutes = getattr(config, "stale_pending_minutes", 15)
     query = (
-        "SELECT * FROM messages WHERE processing_status IN ('EXTRACTION_FAILED', 'VISION_FAILED')"
+        "SELECT * FROM messages "
+        "WHERE processing_status IN ('EXTRACTION_FAILED', 'VISION_FAILED') "
+        f"OR (processing_status = 'PENDING' AND scraped_at <= datetime('now', '-{stale_minutes} minutes'))"
     )
     params = []
 
     if message_id is not None:
-        query += " AND id = ?"
+        query = (
+            "SELECT * FROM messages "
+            "WHERE id = ? AND ("
+            "processing_status IN ('EXTRACTION_FAILED', 'VISION_FAILED') "
+            f"OR (processing_status = 'PENDING' AND scraped_at <= datetime('now', '-{stale_minutes} minutes'))"
+            ")"
+        )
         params.append(message_id)
 
     query += " ORDER BY posted_at ASC"
@@ -77,7 +86,7 @@ async def reprocess_failed_messages(
             continue
 
         if (
-            status == "VISION_FAILED"
+            status in ("VISION_FAILED", "PENDING")
             and has_media
             and (not media_path or not os.path.exists(media_path))
         ):
@@ -98,7 +107,7 @@ async def reprocess_failed_messages(
         new_status = status
 
         try:
-            if status == "VISION_FAILED" and media_path:
+            if (status == "VISION_FAILED" or (status == "PENDING" and has_media)) and media_path:
                 job_result, new_status = await vision.run(media_path, raw_text)
             else:
                 job_result, new_status = await extractor.run(raw_text)
@@ -134,9 +143,15 @@ async def reprocess_failed_messages(
             stats.failed += 1
             logger.warning("Transient error during reprocess", msg_id=msg_id, error=str(e))
             if execute:
+                status_to_set = (
+                    "VISION_FAILED"
+                    if status == "VISION_FAILED" or (status == "PENDING" and has_media)
+                    else "EXTRACTION_FAILED"
+                )
                 await conn.execute(
-                    "UPDATE messages SET retry_count = retry_count + 1, skip_reason = ?, last_retry_at = datetime('now') WHERE id = ?",
+                    "UPDATE messages SET processing_status = ?, retry_count = retry_count + 1, skip_reason = ?, last_retry_at = datetime('now') WHERE id = ?",
                     (
+                        status_to_set,
                         "provider_rate_limit" if "429" in str(e) else "provider_transient_error",
                         msg_id,
                     ),
@@ -149,12 +164,18 @@ async def reprocess_failed_messages(
             if execute:
                 reason = (
                     "provider_vision_failed"
-                    if status == "VISION_FAILED"
+                    if status == "VISION_FAILED" or (status == "PENDING" and has_media)
                     else "provider_extraction_failed"
                 )
                 await conn.execute(
-                    "UPDATE messages SET retry_count = retry_count + 1, skip_reason = ?, last_retry_at = datetime('now') WHERE id = ?",
-                    (reason, msg_id),
+                    "UPDATE messages SET processing_status = ?, retry_count = retry_count + 1, skip_reason = ?, last_retry_at = datetime('now') WHERE id = ?",
+                    (
+                        "VISION_FAILED"
+                        if status == "VISION_FAILED" or (status == "PENDING" and has_media)
+                        else "EXTRACTION_FAILED",
+                        reason,
+                        msg_id,
+                    ),
                 )
                 await conn.commit()
 
