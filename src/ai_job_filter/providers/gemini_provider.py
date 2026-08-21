@@ -3,12 +3,12 @@ from google.genai import types
 from google.genai.errors import APIError
 
 from .base import TextProvider, VisionProvider
-from .errors import ProviderExtractionError, ProviderRateLimitError
+from .errors import ProviderExtractionError, ProviderRateLimitError, TransientAPIError
 from .prompts import SYSTEM_PROMPT
 
 
 class GeminiProvider(TextProvider, VisionProvider):
-    def __init__(self, api_key: str | None = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, model: str, api_key: str | None = None):
         self.api_key = api_key
         self.model = model
         self.client = genai.Client(api_key=api_key) if api_key else None
@@ -37,7 +37,11 @@ class GeminiProvider(TextProvider, VisionProvider):
         except APIError as e:
             if e.code == 429:
                 raise ProviderRateLimitError(f"Gemini Rate Limit: {e}") from e
-            raise e  # Transient network error, catch with tenacity
+            elif e.code in [500, 502, 503, 504]:
+                raise TransientAPIError(f"Gemini Transient Error ({e.code}): {e.message}") from e
+            else:
+                # 400, 401, 403, 404 etc
+                raise ProviderExtractionError(f"Gemini API Error ({e.code}): {e.message}") from e
         except Exception as e:
             raise ProviderExtractionError(f"Gemini Extraction Failed: {e}") from e
 

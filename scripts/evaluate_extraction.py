@@ -1,6 +1,7 @@
 import asyncio
 import os
 
+from ai_job_filter.config import Settings
 from ai_job_filter.models.candidate import CandidateProfile
 from ai_job_filter.processing.extractor import ExtractorPipeline
 from ai_job_filter.processing.scorer import Scorer
@@ -12,7 +13,8 @@ async def evaluate(provider_key: str):
         print("Error: Provide GROQ_API_KEY environment variable to test extraction.")
         return
 
-    provider = GroqProvider(api_key=provider_key)
+    settings = Settings()
+    provider = GroqProvider(api_key=provider_key, model=settings.text_model)
     pipeline = ExtractorPipeline(provider)
 
     # Generate mock profile

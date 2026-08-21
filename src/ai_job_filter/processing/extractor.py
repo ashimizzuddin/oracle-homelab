@@ -1,4 +1,3 @@
-import groq
 import httpx  # for transient network errors if using httpx underneath
 import structlog
 from tenacity import (
@@ -10,7 +9,7 @@ from tenacity import (
 
 from ..models.job import JobExtractionResult
 from ..providers.base import TextProvider
-from ..providers.errors import ProviderExtractionError, ProviderRateLimitError
+from ..providers.errors import ProviderExtractionError, ProviderRateLimitError, TransientAPIError
 
 logger = structlog.get_logger()
 
@@ -22,9 +21,7 @@ class ExtractorPipeline:
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
         stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(
-            (httpx.RequestError, groq.APIConnectionError, groq.InternalServerError)
-        ),
+        retry=retry_if_exception_type((httpx.RequestError, TransientAPIError)),
         reraise=True,
     )
     async def _extract_with_retry(self, text: str) -> dict | None:

@@ -1,11 +1,10 @@
 import httpx
 import structlog
-from google.genai.errors import APIError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from ..models.job import JobExtractionResult
 from ..providers.base import VisionProvider
-from ..providers.errors import ProviderExtractionError, ProviderRateLimitError
+from ..providers.errors import ProviderExtractionError, ProviderRateLimitError, TransientAPIError
 
 logger = structlog.get_logger()
 
@@ -18,7 +17,7 @@ class VisionPipeline:
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
         stop=stop_after_attempt(3),
-        retry=retry_if_exception_type((httpx.RequestError, APIError)),
+        retry=retry_if_exception_type((httpx.RequestError, TransientAPIError)),
         reraise=True,
     )
     async def _extract_with_retry(self, image_path: str, caption: str | None) -> dict | None:
