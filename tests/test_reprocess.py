@@ -14,11 +14,8 @@ async def setup_db(tmp_path):
     db_path = tmp_path / "test.db"
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
-        await conn.executescript("""
-            CREATE TABLE sources (id INTEGER PRIMARY KEY, telegram_id INTEGER UNIQUE, title TEXT NOT NULL, source_type TEXT DEFAULT 'CHANNEL');
-            CREATE TABLE messages (id INTEGER PRIMARY KEY, source_id INTEGER, telegram_msg_id INTEGER, raw_text TEXT, has_media INTEGER, media_path TEXT, processing_status TEXT, retry_count INTEGER DEFAULT 0, skip_reason TEXT, last_retry_at TEXT, posted_at TEXT);
-            CREATE TABLE jobs (id INTEGER PRIMARY KEY, message_id INTEGER UNIQUE, source_id INTEGER, title TEXT, content_hash TEXT, match_score REAL, classification TEXT, company TEXT, location TEXT, workplace_type TEXT, employment_type TEXT, experience_level TEXT, salary_min REAL, salary_max REAL, application_url TEXT, summary TEXT, is_duplicate INTEGER, parent_job_id INTEGER, created_at TEXT DEFAULT (datetime('now')));
-        """)
+        with open("migrations/001_initial_schema.sql") as f:
+            await conn.executescript(f.read())
 
         await conn.execute("INSERT INTO sources (telegram_id, title) VALUES (1, 'test')")
 
@@ -56,7 +53,7 @@ def mock_pipelines():
     class MockClass(enum.Enum):
         MATCH = "MATCH"
 
-    scorer.score_job.return_value = (80.0, MockClass.MATCH, {})
+    scorer.score_job.return_value = (80.0, MockClass.MATCH, "none")
 
     return extractor, vision, scorer
 

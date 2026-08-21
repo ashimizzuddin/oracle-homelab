@@ -1,3 +1,5 @@
+import json
+
 import structlog
 
 from ..models.enums import Classification
@@ -19,7 +21,7 @@ async def score_and_save_job(
     is_dup = 1 if duplicate_parent else 0
     parent_id = duplicate_parent["id"] if duplicate_parent else None
 
-    score, classification, _ = scorer.score_job(job_result)
+    score, classification, hard_fail_reason = scorer.score_job(job_result)
 
     job_id = await db_repo.insert_job(
         message_id=msg_id,
@@ -30,10 +32,24 @@ async def score_and_save_job(
         classification=classification.value,
         company=job_result.company,
         location=job_result.location,
+        workplace_type=job_result.workplace_type,
+        employment_type=job_result.employment_type,
+        experience_level=job_result.experience_level,
+        min_years_exp=job_result.min_years_exp,
+        experience_required=job_result.experience_required,
         salary_min=job_result.salary_min,
         salary_max=job_result.salary_max,
+        salary_currency=job_result.salary_currency,
+        salary_period=job_result.salary_period,
+        salary_raw=job_result.salary_raw,
+        skills_required=json.dumps(job_result.skills_required),
+        skills_preferred=json.dumps(job_result.skills_preferred),
+        requirements_raw=json.dumps(job_result.requirements_raw),
+        contacts=json.dumps(job_result.contacts.model_dump()),
         application_url=job_result.application_url,
         summary=job_result.summary,
+        deadline=job_result.deadline,
+        hard_fail_reason=hard_fail_reason,
         is_duplicate=is_dup,
         parent_job_id=parent_id,
     )

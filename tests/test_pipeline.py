@@ -15,7 +15,7 @@ async def test_score_and_save_job_returns_numeric_score():
 
     scorer = MagicMock()
     # Scorer returns: score, classification, breakdown
-    scorer.score_job.return_value = (85.5, Classification.APPLY, {})
+    scorer.score_job.return_value = (85.5, Classification.APPLY, None)
 
     job_result = JobExtractionResult(
         is_job_posting=True, title="Senior Python Dev", min_years_exp=5
