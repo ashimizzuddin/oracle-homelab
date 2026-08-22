@@ -1,0 +1,18 @@
+{
+  "source": "reddit",
+  "source_url": "https://www.reddit.com/r/netsec/comments/1qn22ig/rnetsecs_q1_2026_information_security_hiring/",
+  "title": "Multiple Security Positions from r/netsec Q1 2026 Hiring Thread",
+  "company": "Various (see thread)",
+  "published_at": "2026-06-01T00:00:00Z",
+  "discovered_at": "2026-08-22T14:00:00Z",
+  "location": "Various (Remote/On-site specified per comment)",
+  "workplace_type": "remote",
+  "employment_type": "full_time",
+  "salary_raw": "Varies per position",
+  "description": "Q1 2026 Information Security Hiring Thread on r/netsec. Companies post open positions directly in comments.",
+  "source_text": "/r/netsec's Q1 2026 Information Security Hiring Thread\n\nIf you have open positions at your company for information security professionals and would like to hire from the r/netsec user base, please leave a comment detailing any open job listings at your company.\n\nPlease reserve top level comments for those posting open positions.\n\nRules & Guidelines:\n- Include the company name in the post\n- Include the geographic location of the position along with the availability of relocation assistance or remote work\n- If you are a third party recruiter, you must disclose this\n- Please be thorough and upfront with the position details\n- Use of non-hr'd (realistic) requirements is encouraged\n- While it's fine to link to the position on your companies website, provide the important details in the comment\n- Mention if applicants should apply officially through HR, or directly through you\n- Please clearly list citizenship, visa, and security clearance requirements\n\nExample comments:\n- Paramount is seeking a Director of Security Operations for Paramount Streaming - https://careers.paramount.com/job/New-York-Director%2C-Security-Operations-NY-10036/1364239700/ (In office, Security Operations, Incident Leadership, Team Leadership, Security Tooling, Policy, Risk, Vendor, Partner & Content Provider Security)\n- Vice President - IT, Cybersecurity, Risk and Compliance, RHELKO - Location: Glendale, WI - 10+ years experience managing teams, BA, CISSP and CISA/CRISC/CISM desirable, MBA highly desirable - https://rehlko.wd12.myworkdayjobs.com/en-US/Reh/job/Milwaukee-WI/Vice-President---IT---Cybersecurity--Risk-and-Compliance_R01939\n\nThis is a hiring thread aggregator, not a single job posting.",
+  "discovery_query": "site:reddit.com/r/netsec hiring",
+  "verification": "verified",
+  "freshness": "LOW_PRIORITY",
+  "vacancy_active": true
+}

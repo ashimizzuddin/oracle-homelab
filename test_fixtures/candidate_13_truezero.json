@@ -1,0 +1,18 @@
+{
+  "source": "company_career",
+  "source_url": "https://jobs.lever.co/truezerotech/6d390f26-4e83-4389-b0bf-0ce30e94b6b7",
+  "title": "Security Monitoring Detection Engineer",
+  "company": "True Zero Technologies",
+  "published_at": "2026-08-12T00:00:00Z",
+  "discovered_at": "2026-08-22T14:00:00Z",
+  "location": "100% Remote",
+  "workplace_type": "remote",
+  "employment_type": "full_time",
+  "salary_raw": "Competitive salary",
+  "description": "Security Monitoring Detection Engineer - Detection as Code, MITRE ATT&CK mapping, SIEM (Splunk/Sentinel), Python/SQL/regex, SOC/IR/threat hunting background. Veteran-owned, Inc 5000 company.",
+  "source_text": "True Zero Technologies - Security Monitoring Detection Engineer (R-00143)\n\n100% Remote\n\nSecurity Resilience – Security Engineering Team /\nFull-Time /\nRemote\n\nTrue Zero Technologies, a veteran-owned small business, was founded on the principle that the purposeful enablement of people and technology in an organization directly ties to the quality of its outcomes. True Zero recognizes that those outcomes begin and end with our people, and that is what we have built a community of like-minded, driven, and passionate individuals and innovators who are aligned in a common goal of delivering top-tier services to our customers. Our culture and commitment have been recognized through numerous accolades, including being named one of the Best Places to Work in 2023 in two categories (\"Prosperous and Thriving\" ($5MM–$50MM in gross revenue) and \"Mid-Atlantic Region\" (DC, DE, MD, NC, VA, WV)), and again in 2025 as a Best Places to Work honoree. In addition, True Zero earned coveted spots on the Inc. 5000 list of fastest-growing companies in America in 2022, 2023, and 2025, a testament to our sustained growth driven by our people-first approach and unwavering dedication to excellence.\n\nJob Responsibilities:\n- Detection Lifecycle Management: Designing, developing, testing, deploying, and maintaining rules to detect threats.\n- \"Detection as Code\" (DaC): Applying software engineering principles (version control, CI/CD, testing) to security rules.\n- Threat Mapping: Mapping detection strategies against frameworks such as MITRE ATT&CK to identify coverage gaps.\n- Log Analysis: Analyzing telemetry from endpoint, network, cloud, and identity systems to identify anomalous patterns.\n- Tuning and Optimization: Continuously tuning rules to reduce noise and enhance actionable alerts.\n\nJob Qualifications:\n- Technical Expertise: Strong proficiency in Python scripting, SQL, and regex, as well as experience with SIEM platforms (e.g., Splunk, Microsoft Sentinel).\n- Behavioral Analysis: Understanding of attacker techniques, tactics, and procedures (TTPs).\n- Data Analysis: Ability to parse and analyze large-scale log data for anomalies.\n- Background: Often requires experience in SOC analysis, incident response, or threat hunting.\n\nBenefits:\n- Competitive salary, paid twice per month\n- Best in class medical coverage\n- 100% of medical premiums covered by True Zero\n- Company wide new business incentive programs\n- Contribution Incentives (i.e. white papers, blog posts, internal webinars, etc.)\n- 3 weeks of PTO starting + 11 Paid Holidays Annually\n- 401k Program with 100% company match on the first 4%\n- Monthly reimbursement of Cell Phone and Home Internet costs\n- Paternity/Maternity Leave\n- Investment in training and certifications to broaden",
+  "discovery_query": "site:lever.co \"security\" remote",
+  "verification": "verified",
+  "freshness": "ACCEPT",
+  "vacancy_active": true
+}

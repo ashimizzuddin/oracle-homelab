@@ -1,0 +1,18 @@
+{
+  "source": "job_board",
+  "source_url": "https://remotive.com/remote/jobs/all-others/senior-security-engineer-4960454",
+  "title": "Senior Security Engineer",
+  "company": "Echelon Risk + Cyber",
+  "published_at": "2026-08-20T00:00:00Z",
+  "discovered_at": "2026-08-22T14:00:00Z",
+  "location": "USA Only (Remote)",
+  "workplace_type": "remote",
+  "employment_type": "full_time",
+  "salary_raw": "Unspecified",
+  "description": "Senior Security Engineer at cybersecurity consulting firm. Security policies, assessments, Azure/AWS cloud security, CSPM, SaaS security, MDM, vulnerability scans, automated pentest, IAM/SSO/PAM, DLP, DR/backup, CIS/NIST benchmarks, SOC 2/ISO 27001/GDPR/CMMC/HIPAA/PCI-DSS, SIEM, MDR/IDS/IPS, firewall config, incident response, security training. 5+ years, CCSP/CISSP/CEH/CISM, MSP/MSSP experience, US work authorization required.",
+  "source_text": "Senior Security Engineer at Echelon Risk + Cyber\n\nLocation: USA Only (Remote)\nPosted: 2 days ago\n\nSenior Security Engineer\n\nEchelon Risk + Cyber is a cybersecurity consulting and managed security services firm. We help organizations build and mature their security programs through consulting, managed services, and incident response.\n\nWe are looking for a Senior Security Engineer to join our growing team. This role involves working with clients across various industries to implement and manage security controls, conduct assessments, and respond to security incidents.\n\nResponsibilities:\n- Develop and maintain security policies, standards, and procedures\n- Conduct security assessments (cloud, network, application)\n- Implement and manage cloud security controls (Azure, AWS)\n- Configure and manage CSPM, SaaS security, MDM solutions\n- Run vulnerability scans and automated penetration testing\n- Implement IAM/SSO/PAM solutions\n- Configure and manage DLP, DR/backup solutions\n- Implement CIS/NIST benchmarks\n- Ensure compliance with SOC 2, ISO 27001, GDPR, CMMC, HIPAA, PCI-DSS\n- Manage SIEM platforms\n- Configure and monitor MDR/IDS/IPS\n- Configure and manage firewalls\n- Incident response and security event analysis\n- Security training and awareness programs\n\nRequirements:\n- 5+ years of security engineering experience\n- CCSP, CISSP, CEH, or CISM certification preferred\n- MSP/MSSP experience strongly preferred\n- Strong experience with Azure and/or AWS security\n- Experience with SIEM platforms (Sentinel, Splunk, etc.)\n- Experience with vulnerability management and automated pentest tools\n- Experience with IAM/SSO/PAM solutions\n- US work authorization required (no visa sponsorship)",
+  "discovery_query": "site:remotive.com \"security\" remote",
+  "verification": "verified",
+  "freshness": "PRIORITY",
+  "vacancy_active": true
+}
