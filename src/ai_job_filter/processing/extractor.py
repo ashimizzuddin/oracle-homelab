@@ -46,7 +46,13 @@ class ExtractorPipeline:
                         return job, "PROCESSED"
                     return None, "EXTRACTION_FAILED"
                 except ProviderExtractionError as e:
+                    err = str(e)
                     logger.warning(f"Extraction attempt {attempt + 1} failed: {e}")
+                    # Deterministic validation failures (schema violations) will
+                    # not improve with retries — fail fast after the first try.
+                    if "validation error" in err or "is_job_posting" in err:
+                        logger.warning("Deterministic validation error; skipping remaining retries")
+                        return None, "EXTRACTION_FAILED"
                     if attempt == 2:
                         return None, "EXTRACTION_FAILED"
 
