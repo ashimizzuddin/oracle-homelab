@@ -89,6 +89,16 @@ class TelegramListener:
         if not result:
             return
         job_id, job_dict, classification = result
+        # Duplicate safety: never send Telegram alerts for job-level duplicates.
+        # The duplicate job row is kept as audit trail; only notification is suppressed.
+        job = await self.db_repo.get_job(job_id)
+        if job and job["is_duplicate"]:
+            logger.info(
+                "Skipping notification for duplicate job",
+                job_id=job_id,
+                parent=job["parent_job_id"],
+            )
+            return
         if classification.value in ["APPLY", "REVIEW"]:
             # Check if notification already exists for this job to prevent duplicates
             notif_id = await self.db_repo.insert_notification(job_id, self.config.user_chat_id)

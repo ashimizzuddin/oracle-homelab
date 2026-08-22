@@ -96,6 +96,13 @@ class Repository:
         ) as cursor:
             return await cursor.fetchone()
 
+    async def get_job(self, job_id: int) -> aiosqlite.Row | None:
+        """Fetch a single job row by id (used for duplicate-notification guard)."""
+        async with self.conn.execute(
+            "SELECT id, is_duplicate, parent_job_id FROM jobs WHERE id = ? LIMIT 1", (job_id,)
+        ) as cursor:
+            return await cursor.fetchone()
+
     async def find_message_by_dhash(self, dhash: str) -> list[aiosqlite.Row]:
         async with self.conn.execute(
             "SELECT * FROM messages WHERE media_dhash IS NOT NULL"
