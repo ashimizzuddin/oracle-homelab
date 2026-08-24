@@ -40,7 +40,12 @@ class VisionPipeline:
                         return job, "PROCESSED"
                     return None, "VISION_FAILED"
                 except ProviderExtractionError as e:
+                    err = str(e)
                     logger.warning(f"Vision extraction attempt {attempt + 1} failed: {e}")
+                    # Deterministic validation failures won't improve on retry
+                    if "validation error" in err or "is_job_posting" in err:
+                        logger.warning("Deterministic validation error; skipping remaining retries")
+                        return None, "VISION_FAILED"
                     if attempt == 2:
                         return None, "VISION_FAILED"
 
