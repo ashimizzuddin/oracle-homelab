@@ -20,13 +20,16 @@ class Repository:
                 title=excluded.title,
                 username=excluded.username,
                 updated_at=datetime('now')
+            RETURNING id
             """,
             (telegram_id, title, source_type, username),
         ) as cursor:
+            row = await cursor.fetchone()
             await self.conn.commit()
-            if cursor.lastrowid:
-                return cursor.lastrowid
+            if row and row["id"]:
+                return row["id"]
 
+            # Fallback (should not happen, but be safe)
             async with self.conn.execute(
                 "SELECT id FROM sources WHERE telegram_id = ?", (telegram_id,)
             ) as c:
