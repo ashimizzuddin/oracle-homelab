@@ -1,9 +1,15 @@
+import asyncio
+
 import aiosqlite
 
 
 class Repository:
     def __init__(self, conn: aiosqlite.Connection):
         self.conn = conn
+        # Serialize DB writes across concurrent coroutines (listener,
+        # retry worker) sharing one connection. Prevents
+        # 'cannot commit transaction - SQL statements in progress'.
+        self.write_lock = asyncio.Lock()
 
     async def insert_source(
         self,
@@ -12,47 +18,49 @@ class Repository:
         source_type: str = "CHANNEL",
         username: str | None = None,
     ) -> int:
-        async with self.conn.execute(
-            """
-            INSERT INTO sources (telegram_id, title, source_type, username)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(telegram_id) DO UPDATE SET
-                title=excluded.title,
-                username=excluded.username,
-                updated_at=datetime('now')
-            RETURNING id
-            """,
-            (telegram_id, title, source_type, username),
-        ) as cursor:
-            row = await cursor.fetchone()
-            await self.conn.commit()
-            if row and row["id"]:
-                return row["id"]
-
-            # Fallback (should not happen, but be safe)
+        async with self.write_lock:
             async with self.conn.execute(
-                "SELECT id FROM sources WHERE telegram_id = ?", (telegram_id,)
-            ) as c:
-                row = await c.fetchone()
-                return row["id"]
+                """
+                INSERT INTO sources (telegram_id, title, source_type, username)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET
+                    title=excluded.title,
+                    username=excluded.username,
+                    updated_at=datetime('now')
+                RETURNING id
+                """,
+                (telegram_id, title, source_type, username),
+            ) as cursor:
+                row = await cursor.fetchone()
+                await self.conn.commit()
+                if row and row["id"]:
+                    return row["id"]
+
+                # Fallback (should not happen, but be safe)
+                async with self.conn.execute(
+                    "SELECT id FROM sources WHERE telegram_id = ?", (telegram_id,)
+                ) as c:
+                    row = await c.fetchone()
+                    return row["id"]
 
     async def insert_message(
         self, source_id: int, telegram_msg_id: int, raw_text: str, posted_at: str, **kwargs
     ) -> int:
-        columns = ["source_id", "telegram_msg_id", "raw_text", "posted_at"]
-        values = [source_id, telegram_msg_id, raw_text, posted_at]
-        for k, v in kwargs.items():
-            columns.append(k)
-            values.append(v)
+        async with self.write_lock:
+            columns = ["source_id", "telegram_msg_id", "raw_text", "posted_at"]
+            values = [source_id, telegram_msg_id, raw_text, posted_at]
+            for k, v in kwargs.items():
+                columns.append(k)
+                values.append(v)
 
-        placeholders = ", ".join(["?"] * len(columns))
-        col_names = ", ".join(columns)
+            placeholders = ", ".join(["?"] * len(columns))
+            col_names = ", ".join(columns)
 
-        async with self.conn.execute(
-            f"INSERT OR IGNORE INTO messages ({col_names}) VALUES ({placeholders})", values
-        ) as cursor:
-            await self.conn.commit()
-            return cursor.lastrowid or 0
+            async with self.conn.execute(
+                f"INSERT OR IGNORE INTO messages ({col_names}) VALUES ({placeholders})", values
+            ) as cursor:
+                await self.conn.commit()
+                return cursor.lastrowid or 0
 
     async def update_message_status(self, msg_id: int, status: str, skip_reason: str | None = None):
         await self.conn.execute(
@@ -71,27 +79,28 @@ class Repository:
         classification: str,
         **kwargs,
     ) -> int:
-        columns = [
-            "message_id",
-            "source_id",
-            "title",
-            "content_hash",
-            "match_score",
-            "classification",
-        ]
-        values = [message_id, source_id, title, content_hash, match_score, classification]
-        for k, v in kwargs.items():
-            columns.append(k)
-            values.append(v)
+        async with self.write_lock:
+            columns = [
+                "message_id",
+                "source_id",
+                "title",
+                "content_hash",
+                "match_score",
+                "classification",
+            ]
+            values = [message_id, source_id, title, content_hash, match_score, classification]
+            for k, v in kwargs.items():
+                columns.append(k)
+                values.append(v)
 
-        placeholders = ", ".join(["?"] * len(columns))
-        col_names = ", ".join(columns)
+            placeholders = ", ".join(["?"] * len(columns))
+            col_names = ", ".join(columns)
 
-        async with self.conn.execute(
-            f"INSERT INTO jobs ({col_names}) VALUES ({placeholders})", values
-        ) as cursor:
-            await self.conn.commit()
-            return cursor.lastrowid or 0
+            async with self.conn.execute(
+                f"INSERT INTO jobs ({col_names}) VALUES ({placeholders})", values
+            ) as cursor:
+                await self.conn.commit()
+                return cursor.lastrowid or 0
 
     async def find_message_by_hash(self, content_hash: str) -> aiosqlite.Row | None:
         async with self.conn.execute(
@@ -127,32 +136,35 @@ class Repository:
     async def insert_notification(
         self, job_id: int, chat_id: int, bot_message_id: int | None = None
     ) -> int:
-        async with self.conn.execute(
-            "SELECT id FROM notifications WHERE job_id = ?", (job_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return 0  # Already notified
+        async with self.write_lock:
+            async with self.conn.execute(
+                "SELECT id FROM notifications WHERE job_id = ?", (job_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return 0  # Already notified
 
-        async with self.conn.execute(
-            "INSERT INTO notifications (job_id, chat_id, bot_message_id) VALUES (?, ?, ?)",
-            (job_id, chat_id, bot_message_id),
-        ) as cursor:
-            await self.conn.commit()
-            return cursor.lastrowid or 0
+            async with self.conn.execute(
+                "INSERT INTO notifications (job_id, chat_id, bot_message_id) VALUES (?, ?, ?)",
+                (job_id, chat_id, bot_message_id),
+            ) as cursor:
+                await self.conn.commit()
+                return cursor.lastrowid or 0
 
     async def update_user_action(self, notif_id: int, action: str, notes: str | None = None):
-        await self.conn.execute(
-            "UPDATE notifications SET user_action = ?, user_notes = ?, action_at = datetime('now') WHERE id = ?",
-            (action, notes, notif_id),
-        )
-        await self.conn.commit()
+        async with self.write_lock:
+            await self.conn.execute(
+                "UPDATE notifications SET user_action = ?, user_notes = ?, action_at = datetime('now') WHERE id = ?",
+                (action, notes, notif_id),
+            )
+            await self.conn.commit()
 
     async def get_message(self, message_id: int) -> aiosqlite.Row | None:
-        async with self.conn.execute(
-            "SELECT * FROM messages WHERE id = ?", (message_id,)
-        ) as cursor:
-            return await cursor.fetchone()
+        async with self.write_lock:
+            async with self.conn.execute(
+                "SELECT * FROM messages WHERE id = ?", (message_id,)
+            ) as cursor:
+                return await cursor.fetchone()
 
     async def get_job_by_message_id(self, message_id: int) -> aiosqlite.Row | None:
         async with self.conn.execute(
@@ -164,16 +176,18 @@ class Repository:
         if not kwargs:
             return
 
-        protected = {"id", "message_id", "source_id", "content_hash"}
-        update_cols = {k: v for k, v in kwargs.items() if k not in protected}
+        async with self.write_lock:
 
-        if not update_cols:
-            return
+            protected = {"id", "message_id", "source_id", "content_hash"}
+            update_cols = {k: v for k, v in kwargs.items() if k not in protected}
 
-        cols = list(update_cols.keys())
-        set_clause = ", ".join(f"{col} = ?" for col in cols)
-        values = [update_cols[col] for col in cols]
-        values.append(job_id)
+            if not update_cols:
+                return
 
-        await self.conn.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
-        await self.conn.commit()
+            cols = list(update_cols.keys())
+            set_clause = ", ".join(f"{col} = ?" for col in cols)
+            values = [update_cols[col] for col in cols]
+            values.append(job_id)
+
+            await self.conn.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
+            await self.conn.commit()
