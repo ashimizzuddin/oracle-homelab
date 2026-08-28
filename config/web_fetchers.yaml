@@ -1,0 +1,93 @@
+# Web fetcher registry (PRD F-WEB-2)
+# All boards run once per day. Jobstreet & LinkedIn intentionally excluded
+# (robots/ToS — see docs/PRD-v1.0.md section 3).
+#
+# tier: easy (HTTP/sitemap/API) | medium (HTML parsing, JS-adjacent)
+
+defaults:
+  interval_hours: 24
+  delay_seconds: 3.0
+  max_items: 20
+  use_playwright: false
+
+boards:
+  # ---------------- Easy tier (6) ----------------
+  - name: talentics
+    base_url: https://api.talentics.id
+    tier: easy
+    max_items: 30
+    options:
+      api_path: /v2/jobs
+      keywords: [linux, security, network, devops, infrastructure, soc]
+
+  - name: hiredtoday
+    base_url: https://www.hiredtoday.com
+    tier: easy
+    enabled: false  # sitemap URLs 404 as of 2026-08-28 (stale) — re-enable later
+    max_items: 25
+    options:
+      sitemap: /sitemap.xml
+      detail_prefix: /en/jobs-detail/
+
+  - name: dealls
+    base_url: https://dealls.com
+    tier: easy
+    max_items: 25
+    options:
+      sitemap: /sitemap.xml
+      category_path: /en/jobs?category=information-technology
+
+  - name: techinasia
+    base_url: https://www.techinasia.com
+    tier: easy
+    max_items: 20
+    options:
+      sitemap: /sitemaps/jobs/sitemap.xml
+
+  - name: kitalulus
+    base_url: https://kitalulus.com
+    tier: easy
+    max_items: 25
+    options:
+      sitemap: /sitemap.xml
+      specialization: teknologi-informasi
+
+  - name: lokerid
+    base_url: https://www.loker.id
+    tier: easy
+    enabled: false  # 403 for datacenter UA as of 2026-08-28 — re-enable later
+    max_items: 25
+    options:
+      listing_path: /lowongan-kerja/teknologi-informasi
+
+  # ---------------- Medium tier (4 boards, 5 entries) ----------------
+  - name: glints
+    base_url: https://glints.com
+    tier: medium
+    max_items: 25
+    options:
+      listing_path: /id/lowongan-kerja?kategori=teknologi
+      # NOTE: robots.txt Disallow /api/* — we parse HTML/__NEXT_DATA__ only.
+
+  - name: kalibrr
+    base_url: https://www.kalibrr.id
+    tier: medium
+    max_items: 20
+    options:
+      search_path: /c/teknologi-dan-startup/jobs
+      # Search page only; detail pages may 403 datacenter IPs — skip detail.
+
+  - name: karircom
+    base_url: https://www.karir.com
+    tier: medium
+    max_items: 15
+    options:
+      search_path: /search?q=teknologi+informasi
+      crawl_delay: 1  # robots.txt requires Crawl-delay: 1
+
+  - name: topkarir
+    base_url: https://www.topkarir.com
+    tier: medium
+    max_items: 15
+    options:
+      search_path: /lowongan

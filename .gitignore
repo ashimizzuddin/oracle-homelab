@@ -19,3 +19,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 sevima_seen.json
+
+# web fetcher state now in DB; keep legacy json ignored
+*_seen.json

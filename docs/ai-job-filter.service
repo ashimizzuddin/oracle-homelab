@@ -1,0 +1,24 @@
+# AI JOB FILTER — systemd user unit (PRD F-WEB-4 / NEXT_STEPS fix)
+# Install:  cp docs/ai-job-filter.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload
+#           systemctl --user enable --now ai-job-filter.service
+#
+# NOTE: dirname "AI JOB FILTER" contains a space which breaks ExecStart;
+# create a symlink first:  ln -s ~/tools/"AI JOB FILTER" ~/tools/ai-job-filter
+
+[Unit]
+Description=AI Job Filter daemon (Telegram + web ingestion)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/tools/ai-job-filter
+ExecStart=%h/tools/ai-job-filter/.venv/bin/python -m ai_job_filter.main
+Restart=on-failure
+RestartSec=30
+# Daily web run is scheduled inside the daemon at 07:00 (web_scheduler)
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

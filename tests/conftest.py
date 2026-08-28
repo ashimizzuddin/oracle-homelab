@@ -54,5 +54,7 @@ def candidate_profile():
 async def in_memory_db():
     conn = await get_connection(":memory:")
     await apply_migrations(conn)
-    yield conn
+    from ai_job_filter.db.repository import Repository
+
+    yield Repository(conn)
     await conn.close()

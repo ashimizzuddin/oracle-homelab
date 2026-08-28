@@ -21,7 +21,7 @@ def mock_config():
 
 @pytest.mark.asyncio
 async def test_notifier_dry_run(mock_config, in_memory_db, capsys):
-    repo = Repository(in_memory_db)
+    repo = in_memory_db
     notifier = TelegramNotifier(mock_config, repo)
 
     job_dict = {
@@ -45,7 +45,7 @@ async def test_notifier_dry_run(mock_config, in_memory_db, capsys):
 
 @pytest.mark.asyncio
 async def test_idempotent_notification(mock_config, in_memory_db):
-    repo = Repository(in_memory_db)
+    repo = in_memory_db
 
     await repo.conn.execute("""
         INSERT INTO sources (id, telegram_id, title, source_type) VALUES (1, 123, 'test', 'CHANNEL')
@@ -71,7 +71,7 @@ async def test_idempotent_notification(mock_config, in_memory_db):
 
 @pytest.mark.asyncio
 async def test_callback_authorization(mock_config, in_memory_db, capsys):
-    repo = Repository(in_memory_db)
+    repo = in_memory_db
     notifier = TelegramNotifier(mock_config, repo)
 
     # Mock update
@@ -134,7 +134,7 @@ async def test_callback_authorization(mock_config, in_memory_db, capsys):
 
 @pytest.mark.asyncio
 async def test_notifier_html_escaping(mock_config, in_memory_db, capsys):
-    repo = Repository(in_memory_db)
+    repo = in_memory_db
     notifier = TelegramNotifier(mock_config, repo)
 
     job_dict = {
