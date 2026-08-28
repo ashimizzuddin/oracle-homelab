@@ -58,3 +58,34 @@
 ## Reminder
 USER MINTA DIINGATKAN langkah-langkah di atas via Telegram saat buka laptop
 berikutnya.
+
+## Migrasi VPS — SELESAI (2026-08-28)
+
+**VPS Oracle PAYG `ubuntu@129.225.13.217` sekarang SATU-SATUNYA daemon aktif (24/7, Rp 0).**
+
+| Item | Status |
+|---|---|
+| Kode VPS | `10341a8` (Fase A + B ter-sync via git bundle) |
+| Deps | `uv sync` ARM OK, 104 tests pass |
+| `.env` | Session string BARU (session lama invalid oleh Telegram — AuthKeyDuplicated), channels di-trim ke 3 (@LowonganKerjaIT, @joinkerjatalenthub, @devopsindonesia); backup: `.env.bak-20260828` |
+| Listener | ✅ connected, 0 Conflict |
+| Web scheduler | ✅ 8 boards, jadwal harian 07:00 (server time UTC — cek `journalctl` bila perlu) |
+| Notif test | ✅ sendMessage OK dari VPS |
+| anti-idle cron | ✅ tetap jalan (jangan dihapus — jaga instance Oracle dari reclaim) |
+
+### Konfigurasi penting VPS
+- Unit: `~/.config/systemd/user/ai-job-filter.service` (WorkingDirectory=%h/ai-job-filter, tanpa symlink)
+- Python: `.venv` 3.14 via uv aarch64
+- Linger=yes (jalan tanpa login)
+
+### Laptop lokal
+- Daemon: `disabled` + tidak ada proses — JANGAN di-enable lagi kalau tidak mau Conflict
+- Boleh dipakai untuk development; sync ke VPS via `git bundle` + scp (lihat pola migrasi)
+
+### Rollback (darurat)
+```bash
+# VPS
+cd ~/ai-job-filter && git reset --hard e3cc311 && systemctl --user restart ai-job-filter
+# Lokal (balikin daemon ke laptop)
+systemctl --user enable --now ai-job-filter
+```
