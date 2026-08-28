@@ -110,7 +110,6 @@ def parse_detail(text: str) -> dict:
         t = m.group(1).lower().replace(" ", "-")
         out["employment_type"] = {"fulltime": "full-time", "part-time": "part-time"}.get(t, t)
 
-    loc = re.search(r"\n([A-Z][a-zA-Z]+(?:,?\s[A-Z][a-z]+)*),?\s+(?:Jawa\s+)?[A-Za-z ]+\n", text)
     salary = re.search(r"Rp\s?[\d.,]+\s*-\s*Rps?\s?[\d.,]+", text)
 
     if salary:
@@ -123,26 +122,26 @@ def parse_detail(text: str) -> dict:
         end = min(end_candidates) if end_candidates else start + 6000
         desc_block = text[start:end]
         lines = [
-            l.strip()
-            for l in desc_block.splitlines()
-            if l.strip()
-            and not l.strip().startswith(("await ", "const ", "fetch(", "if (!", "})()", "{"))
-            and "copyToClipboard" not in l
+            line.strip()
+            for line in desc_block.splitlines()
+            if line.strip()
+            and not line.strip().startswith(("await ", "const ", "fetch(", "if (!", "})()", "{"))
+            and "copyToClipboard" not in line
         ]
         # drop header line & meta lines already extracted
         skip = {"Deskripsi Pekerjaan", "Lamar Pekerjaan"}
         cleaned = []
-        for l in lines:
-            if l in skip:
+        for line in lines:
+            if line in skip:
                 continue
-            if out["employment_type"] != "unknown" and l.lower() == out["employment_type"].replace("-", ""):
+            if out["employment_type"] != "unknown" and line.lower() == out["employment_type"].replace("-", ""):
                 continue
-            if out["location"] is None and re.match(r"^[A-Z][a-zA-Z]+, Jawa", l):
-                out["location"] = l
+            if out["location"] is None and re.match(r"^[A-Z][a-zA-Z]+, Jawa", line):
+                out["location"] = line
                 continue
-            if out["salary_raw"] and l.replace(" ", "").startswith("Rp"):
+            if out["salary_raw"] and line.replace(" ", "").startswith("Rp"):
                 continue
-            cleaned.append(l)
+            cleaned.append(line)
         out["description"] = "\n".join(cleaned)
 
     return out
@@ -209,8 +208,6 @@ async def main():
                 continue
             detail = parse_detail(detail_html)
 
-            # Title refinement: use H1-ish first meaningful line if available
-            m = re.search(r"^([A-Z][^\n]{3,60})$", detail.get("description", ""), re.M)
             cand = build_candidate(job, detail, title)
 
             out_file = Path(f"/tmp/sevima_{slug}.json")

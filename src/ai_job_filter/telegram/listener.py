@@ -64,7 +64,12 @@ class TelegramListener:
                 ):
                     count += 1
                     result = await self.handler.handle_new_message(message, source_id)
-                    await self._handle_notification(result)
+                    await self._handle_notification(
+                        result,
+                        raw_text=message.text or "",
+                        source_id=source_id,
+                        msg_id=message.id,
+                    )
                 logger.info(f"Synced {count} historical messages for {identifier}")
 
             except Exception as e:
@@ -81,11 +86,16 @@ class TelegramListener:
                     username=getattr(entity, "username", None),
                 )
                 result = await self.handler.handle_new_message(event.message, source_id)
-                await self._handle_notification(result)
+                await self._handle_notification(
+                    result,
+                    raw_text=event.message.text or "",
+                    source_id=source_id,
+                    msg_id=event.message.id,
+                )
             except Exception as e:
                 logger.error("Error in real-time handler", error=str(e))
 
-    async def _handle_notification(self, result):
+    async def _handle_notification(self, result, raw_text: str = "", source_id: int | None = None, msg_id: int | None = None):
         if not result:
             return
         job_id, job_dict, classification = result
@@ -103,6 +113,17 @@ class TelegramListener:
             # Check if notification already exists for this job to prevent duplicates
             notif_id = await self.db_repo.insert_notification(job_id, self.config.user_chat_id)
             if notif_id > 0:
+                # Enrich payload so notifier can render score, fallback link
+                # (t.me/c/{source}/{msg}) and fallback summary (PRD F-NOT-1/2).
+                job_row = await self.db_repo.get_job_by_message_id(msg_id) if msg_id else None
+                if job_row:
+                    job_dict["match_score"] = job_row["match_score"]
+                    job_dict["application_url"] = job_dict.get("application_url") or job_row["application_url"]
+                    job_dict["summary"] = job_dict.get("summary") or job_row["summary"]
+                job_dict["raw_text"] = raw_text
+                job_dict["source_id"] = source_id
+                job_dict["message_id"] = msg_id
+                job_dict.setdefault("classification", classification.value)
                 await self.notifier.send_job_alert(job_dict, notif_id)
 
     async def disconnect(self):

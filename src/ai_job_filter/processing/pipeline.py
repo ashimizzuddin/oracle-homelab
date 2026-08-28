@@ -5,7 +5,7 @@ import structlog
 from ..models.enums import Classification
 from ..models.job import JobExtractionResult
 from .dedup import check_job_level_duplicate
-from .normalizer import compute_text_hash
+from .normalizer import compute_text_hash, normalize_text
 
 logger = structlog.get_logger()
 
@@ -13,7 +13,8 @@ logger = structlog.get_logger()
 async def score_and_save_job(
     db_repo, scorer, msg_id: int, source_id: int, raw_text: str, job_result: JobExtractionResult
 ) -> tuple[int, float, Classification]:
-    content_hash = compute_text_hash(raw_text)
+    # PRD F-DED-2: hash the normalized text so case/whitespace variants dedup
+    content_hash = compute_text_hash(normalize_text(raw_text))
 
     recent_jobs = [dict(row) for row in await db_repo.find_recent_jobs(30)]
     duplicate_parent = check_job_level_duplicate(job_result.model_dump(), recent_jobs)

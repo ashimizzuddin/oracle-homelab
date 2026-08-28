@@ -11,6 +11,7 @@ from .db.repository import Repository
 from .models.candidate import CandidateProfile
 from .models.enums import ProcessingStatus
 from .processing.extractor import ExtractorPipeline
+from .processing.pipeline import score_and_save_job
 from .processing.scorer import Scorer
 from .processing.vision import VisionPipeline
 from .providers.gemini_provider import GeminiProvider
@@ -18,6 +19,7 @@ from .providers.groq_provider import GroqProvider
 from .telegram.handlers import MessageHandler
 from .telegram.listener import TelegramListener
 from .telegram.notifier import TelegramNotifier
+from .web_fetcher.scheduler import web_scheduler
 
 logger = structlog.get_logger()
 
@@ -55,36 +57,32 @@ async def retry_worker(db_repo, handler, notifier):
                 else:
                     job_result, status = await handler.extractor.run(raw_text)
 
-                await db_repo.conn.execute(
-                    "UPDATE messages SET retry_count = retry_count + 1, last_retry_at = datetime('now') WHERE id = ?",
-                    (msg_id,),
-                )
-                await db_repo.conn.commit()
+                async with db_repo.write_lock:
+                    await db_repo.conn.execute(
+                        "UPDATE messages SET retry_count = retry_count + 1, last_retry_at = datetime('now') WHERE id = ?",
+                        (msg_id,),
+                    )
+                    await db_repo.conn.commit()
 
                 await db_repo.update_message_status(msg_id, status)
 
                 if status == "PROCESSED" and job_result:
-                    score, classification, _ = handler.scorer.score_job(job_result)
-                    job_id = await db_repo.insert_job(
-                        message_id=msg_id,
-                        source_id=msg["source_id"],
-                        title=job_result.title,
-                        content_hash="retried",  # simplified for retry
-                        match_score=score,
-                        classification=classification.value,
-                        company=job_result.company,
-                        location=job_result.location,
-                        salary_min=job_result.salary_min,
-                        salary_max=job_result.salary_max,
-                        application_url=job_result.application_url,
-                        summary=job_result.summary,
-                        is_duplicate=0,
-                        parent_job_id=None,
+                    # PRD F-DED-2: retry path must reuse the real pipeline so
+                    # content_hash, dedup and score_breakdown stay consistent
+                    # (was: content_hash="retried" hardcoded, broke dedup).
+                    job_id, score, classification = await score_and_save_job(
+                        db_repo, handler.scorer, msg_id, msg["source_id"], raw_text, job_result
                     )
                     if classification.value in ["APPLY", "REVIEW"]:
                         notif_id = await db_repo.insert_notification(job_id, notifier.user_chat_id)
                         if notif_id > 0:
-                            await notifier.send_job_alert(job_result.model_dump(), notif_id)
+                            payload = job_result.model_dump()
+                            payload["match_score"] = score
+                            payload["classification"] = classification.value
+                            payload["raw_text"] = raw_text
+                            payload["message_id"] = msg_id
+                            payload["source_id"] = msg["source_id"]
+                            await notifier.send_job_alert(payload, notif_id)
 
             await asyncio.sleep(60)  # Wait a minute before checking again
         except asyncio.CancelledError:
@@ -116,11 +114,17 @@ async def run():
     extractor = ExtractorPipeline(groq_provider)
     vision = VisionPipeline(gemini_provider)
 
-    profile = CandidateProfile(
-        professional_years=0
-    )  # For Phase 3, we use default profile if not loaded from yaml
-    with contextlib.suppress(Exception):
+    profile = CandidateProfile(professional_years=0)
+    # Fail loud: a broken/missing profile silently degrades scoring to near-zero,
+    # which was the root cause of "0/100" notifications (PRD section 1).
+    try:
         profile = CandidateProfile.from_yaml("candidate_profile.yaml")
+    except Exception as e:
+        logger.error(
+            "Failed to load candidate_profile.yaml — scoring will be degraded. "
+            "Fix the file and restart.",
+            error=str(e),
+        )
 
     scorer = Scorer(profile, min_apply=config.min_score_apply, min_review=config.min_score_review)
 
@@ -139,6 +143,11 @@ async def run():
     # Start Background Retry Worker
     worker_task = asyncio.create_task(retry_worker(db_repo, handler, notifier))
 
+    # Start Web Scheduler (PRD F-WEB-4: daily at 07:00, 11 boards)
+    web_task = asyncio.create_task(
+        web_scheduler(db_repo, extractor, scorer, config, notifier)
+    )
+
     # Start Listener (Telethon)
     await listener.start()
     if listener.client:
@@ -154,6 +163,7 @@ async def run():
 
         logger.info("Shutting down...")
         worker_task.cancel()
+        web_task.cancel()
         await listener.disconnect()
         if notifier.app:
             if not config.dry_run:

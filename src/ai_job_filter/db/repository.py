@@ -18,9 +18,8 @@ class Repository:
         source_type: str = "CHANNEL",
         username: str | None = None,
     ) -> int:
-        async with self.write_lock:
-            async with self.conn.execute(
-                """
+        async with self.write_lock, self.conn.execute(
+            """
                 INSERT INTO sources (telegram_id, title, source_type, username)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(telegram_id) DO UPDATE SET
@@ -29,19 +28,19 @@ class Repository:
                     updated_at=datetime('now')
                 RETURNING id
                 """,
-                (telegram_id, title, source_type, username),
-            ) as cursor:
-                row = await cursor.fetchone()
-                await self.conn.commit()
-                if row and row["id"]:
-                    return row["id"]
+            (telegram_id, title, source_type, username),
+        ) as cursor:
+            row = await cursor.fetchone()
+            await self.conn.commit()
+            if row and row["id"]:
+                return row["id"]
 
-                # Fallback (should not happen, but be safe)
-                async with self.conn.execute(
-                    "SELECT id FROM sources WHERE telegram_id = ?", (telegram_id,)
-                ) as c:
-                    row = await c.fetchone()
-                    return row["id"]
+            # Fallback (should not happen, but be safe)
+            async with self.conn.execute(
+                "SELECT id FROM sources WHERE telegram_id = ?", (telegram_id,)
+            ) as c:
+                row = await c.fetchone()
+                return row["id"]
 
     async def insert_message(
         self, source_id: int, telegram_msg_id: int, raw_text: str, posted_at: str, **kwargs
@@ -63,11 +62,26 @@ class Repository:
                 return cursor.lastrowid or 0
 
     async def update_message_status(self, msg_id: int, status: str, skip_reason: str | None = None):
-        await self.conn.execute(
-            "UPDATE messages SET processing_status = ?, skip_reason = ? WHERE id = ?",
-            (status, skip_reason, msg_id),
-        )
-        await self.conn.commit()
+        # Uses write_lock: called concurrently by listener + retry_worker sharing
+        # one connection (prevents 'cannot commit transaction' race).
+        async with self.write_lock:
+            await self.conn.execute(
+                "UPDATE messages SET processing_status = ?, skip_reason = ? WHERE id = ?",
+                (status, skip_reason, msg_id),
+            )
+            await self.conn.commit()
+
+    async def update_message_hashes(self, msg_id: int, **kwargs):
+        """Persist media_sha256 / media_dhash / media_path / media_type (PRD F-DED-1)."""
+        allowed = {"media_sha256", "media_dhash", "media_path", "media_type"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return
+        async with self.write_lock:
+            set_clause = ", ".join(f"{col} = ?" for col in updates)
+            values = [*updates.values(), msg_id]
+            await self.conn.execute(f"UPDATE messages SET {set_clause} WHERE id = ?", values)
+            await self.conn.commit()
 
     async def insert_job(
         self,
@@ -115,9 +129,24 @@ class Repository:
         ) as cursor:
             return await cursor.fetchone()
 
-    async def find_message_by_dhash(self, dhash: str) -> list[aiosqlite.Row]:
+    async def find_message_by_dhash(self, dhash: str, max_distance: int = 12) -> list[aiosqlite.Row]:
+        """Fetch candidate rows for perceptual image dedup.
+
+        Uses a coarse bit-prefix prefilter on the dhash hex string to avoid a
+        full table scan, then callers refine with exact hamming distance.
+        (dhash stored as 16-hex-char string = 64 bits; a low hamming distance
+        implies at least the first hex char often matches.)
+        """
+        # Prefetch: same first char OR same second char narrows candidates
+        # dramatically while still catching near-duplicates.
+        prefix_a, prefix_b = dhash[:2], dhash[2:4]
         async with self.conn.execute(
-            "SELECT * FROM messages WHERE media_dhash IS NOT NULL"
+            """
+            SELECT * FROM messages
+            WHERE media_dhash IS NOT NULL
+              AND (media_dhash LIKE ? || '%' OR media_dhash LIKE ? || '%')
+            """,
+            (prefix_a, prefix_b),
         ) as cursor:
             return await cursor.fetchall()
 
@@ -160,11 +189,10 @@ class Repository:
             await self.conn.commit()
 
     async def get_message(self, message_id: int) -> aiosqlite.Row | None:
-        async with self.write_lock:
-            async with self.conn.execute(
-                "SELECT * FROM messages WHERE id = ?", (message_id,)
-            ) as cursor:
-                return await cursor.fetchone()
+        async with self.write_lock, self.conn.execute(
+            "SELECT * FROM messages WHERE id = ?", (message_id,)
+        ) as cursor:
+            return await cursor.fetchone()
 
     async def get_job_by_message_id(self, message_id: int) -> aiosqlite.Row | None:
         async with self.conn.execute(
@@ -190,4 +218,49 @@ class Repository:
             values.append(job_id)
 
             await self.conn.execute(f"UPDATE jobs SET {set_clause} WHERE id = ?", values)
+            await self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Fetcher state (PRD F-WEB-3) — DB-backed, replaces *_seen.json files
+    # ------------------------------------------------------------------
+
+    async def get_fetcher_state(self, source: str) -> tuple[list[str], str | None]:
+        """Return (seen_slugs, last_run_at) for a fetcher source."""
+        async with self.conn.execute(
+            "SELECT seen_slugs, last_run_at FROM fetcher_state WHERE source = ?", (source,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return [], None
+        try:
+            import json
+
+            slugs = json.loads(row["seen_slugs"] or "[]")
+        except (ValueError, TypeError):
+            slugs = []
+        return slugs, row["last_run_at"]
+
+    async def save_fetcher_state(
+        self, source: str, seen_slugs: list[str], status: str = "ok", stats: dict | None = None
+    ) -> None:
+        import json
+
+        async with self.write_lock:
+            await self.conn.execute(
+                """
+                INSERT INTO fetcher_state (source, last_run_at, last_status, seen_slugs, stats)
+                VALUES (?, datetime('now'), ?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    last_run_at=excluded.last_run_at,
+                    last_status=excluded.last_status,
+                    seen_slugs=excluded.seen_slugs,
+                    stats=excluded.stats
+                """,
+                (
+                    source,
+                    status,
+                    json.dumps(sorted(seen_slugs)),
+                    json.dumps(stats or {}),
+                ),
+            )
             await self.conn.commit()

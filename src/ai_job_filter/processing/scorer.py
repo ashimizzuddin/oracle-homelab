@@ -11,14 +11,34 @@ class Scorer:
         self.min_apply = min_apply
         self.min_review = min_review
 
+    # PRD F-SCO-1: full senior-title gate per ADR v1.1 section J
+    SENIOR_TITLE_KEYWORDS = (
+        "senior",
+        "lead",
+        "principal",
+        "manager",
+        "director",
+        "head of",
+        "vp ",
+        "vp-",
+        "vp,",
+        "chief",
+        "cto",
+        "cio",
+        "ciso",
+    )
+
+    # PRD F-SCO-2: accept both hyphenated and non-hyphenated workplace types
+    VALID_WORKPLACE_TYPES: frozenset[str] = frozenset(
+        {"remote", "hybrid", "onsite", "on-site"}
+    )
+
     def score_job(self, job: JobExtractionResult) -> tuple[int, Classification, str | None]:
         # 1. Hard fail checks
-        if (
-            "senior" in job.title.lower()
-            or "lead" in job.title.lower()
-            or "manager" in job.title.lower()
-        ):
-            return 0, Classification.IGNORE, "Senior/Lead role"
+        title_lower = job.title.lower()
+        for keyword in self.SENIOR_TITLE_KEYWORDS:
+            if keyword in title_lower:
+                return 0, Classification.IGNORE, f"Senior/Lead role (matched '{keyword.strip()}')"
 
         if (
             job.min_years_exp is not None
@@ -57,6 +77,7 @@ class Scorer:
             score = min(100, score + 10)
 
         # 4. Experience fit (0-20)
+        # PRD F-SCO-3: nuanced 3-year preferred/plus handling per ADR table
         if job.min_years_exp is None or job.min_years_exp <= 1:
             score += 20
         elif job.min_years_exp == 2:
@@ -64,6 +85,8 @@ class Scorer:
                 score += 10
             else:
                 score += 5  # 2 years required is a stretch for 0 years
+        elif job.min_years_exp == 3 and job.experience_required in ("preferred", "plus"):
+            score += 5  # 3+ years preferred is not a hard gate per ADR
 
         # 5. Career trajectory (0-15)
         traj_score = 0
@@ -85,7 +108,8 @@ class Scorer:
         score += traj_score
 
         # 6. Practical factors (0-10) (workplace type, etc)
-        if job.workplace_type in ["remote", "hybrid", "on-site"]:
+        # PRD F-SCO-2: "onsite" (no hyphen) is common in Indonesian postings
+        if job.workplace_type in self.VALID_WORKPLACE_TYPES:
             score += 5
         if job.salary_min is not None or job.salary_max is not None:
             score += 5

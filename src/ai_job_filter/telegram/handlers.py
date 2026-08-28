@@ -7,7 +7,7 @@ from telethon.tl.types import Message
 from ..models.enums import ProcessingStatus
 from ..processing.detector import is_potential_job
 from ..processing.image_hash import compute_dhash, compute_sha256, hamming_distance
-from ..processing.normalizer import compute_text_hash
+from ..processing.normalizer import compute_text_hash, normalize_text
 from ..processing.pipeline import score_and_save_job
 
 logger = structlog.get_logger()
@@ -76,8 +76,13 @@ class MessageHandler:
                 return
 
             if media_path:
-                compute_sha256(media_path)
+                media_sha = compute_sha256(media_path)
                 media_dhash = compute_dhash(media_path)
+
+                # PRD F-DED-1: persist hashes to DB so dedup survives restarts
+                await self.db_repo.update_message_hashes(
+                    msg_id, media_sha256=media_sha, media_dhash=media_dhash
+                )
 
                 # Check dHash Dedup (Tier 1)
                 existing_dhashes = await self.db_repo.find_message_by_dhash(media_dhash)
@@ -95,7 +100,9 @@ class MessageHandler:
                         return
 
         # 4. Text Dedup (Tier 2)
-        content_hash = compute_text_hash(raw_text)
+        # PRD F-DED-2: hash the normalized text, not raw, so case/whitespace
+        # variants dedup correctly
+        content_hash = compute_text_hash(normalize_text(raw_text))
         if await self.db_repo.find_message_by_hash(content_hash):
             await self.db_repo.update_message_status(
                 msg_id, ProcessingStatus.DUPLICATE, "Text hash match"
