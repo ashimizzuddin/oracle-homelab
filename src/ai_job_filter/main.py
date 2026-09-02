@@ -76,12 +76,19 @@ async def retry_worker(db_repo, handler, notifier):
                     if classification.value in ["APPLY", "REVIEW"]:
                         notif_id = await db_repo.insert_notification(job_id, notifier.user_chat_id)
                         if notif_id > 0:
+                            # Fetch source metadata for t.me links (same as listener)
+                            source_row = await db_repo.get_source(msg["source_id"]) if msg["source_id"] else None
+                            source_telegram_id = source_row["telegram_id"] if source_row else None
+                            source_username = source_row["username"] if source_row else None
+                            telegram_msg_id = msg["telegram_msg_id"]
+
                             payload = job_result.model_dump()
                             payload["match_score"] = score
                             payload["classification"] = classification.value
                             payload["raw_text"] = raw_text
-                            payload["message_id"] = msg_id
-                            payload["source_id"] = msg["source_id"]
+                            payload["source_telegram_id"] = source_telegram_id
+                            payload["source_username"] = source_username
+                            payload["telegram_msg_id"] = telegram_msg_id
                             await notifier.send_job_alert(payload, notif_id)
 
             await asyncio.sleep(60)  # Wait a minute before checking again

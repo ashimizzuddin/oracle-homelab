@@ -125,7 +125,7 @@ class Repository:
     async def get_job(self, job_id: int) -> aiosqlite.Row | None:
         """Fetch a single job row by id (used for duplicate-notification guard)."""
         async with self.conn.execute(
-            "SELECT id, is_duplicate, parent_job_id FROM jobs WHERE id = ? LIMIT 1", (job_id,)
+            "SELECT * FROM jobs WHERE id = ? LIMIT 1", (job_id,)
         ) as cursor:
             return await cursor.fetchone()
 
@@ -197,6 +197,13 @@ class Repository:
     async def get_job_by_message_id(self, message_id: int) -> aiosqlite.Row | None:
         async with self.conn.execute(
             "SELECT * FROM jobs WHERE message_id = ?", (message_id,)
+        ) as cursor:
+            return await cursor.fetchone()
+
+    async def get_source(self, source_id: int) -> aiosqlite.Row | None:
+        """Fetch source metadata (telegram_id, username) for building t.me links."""
+        async with self.conn.execute(
+            "SELECT * FROM sources WHERE id = ?", (source_id,)
         ) as cursor:
             return await cursor.fetchone()
 

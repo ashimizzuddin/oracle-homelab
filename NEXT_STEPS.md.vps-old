@@ -1,0 +1,22 @@
+# AI JOB FILTER — Status & Next Steps (2026-08-23)
+
+## Status saat ini
+- Daemon live via systemd user unit `ai-job-filter.service` (DRY_RUN=true)
+- 89 tests passing; SEVIMA fetcher end-to-end teruji (Security Engineer → 58/REVIEW)
+- Commit terakhir: ef4a782 (gitignore), 3c79ed1 (fetcher), 33b16bb (validation fail-fast)
+
+## Next steps yang disepakati
+1. **DRY_RUN=false** di `.env` → restart service → test notifikasi Telegram sampai ke HP
+2. **Daftar Oracle Cloud Always Free** region Batam/Singapore (ARM 2core/12GB, gratis selamanya) sebagai VPS 24/7
+   - Fallback jika verifikasi kartu gagal: RackNerd Black Friday (~$11/tahun)
+3. **Migrasi ke VPS**: rsync proyek + .env + jobs.db → pasang systemd unit yang sama
+4. **Evaluasi setelah 1 minggu**: kualitas alert, false positive rate, Groq quota
+
+## Catatan teknis
+- SEVIMA fetcher butuh playwright: pakai /tmp/scraper-venv (sementara) atau buat venv permanen
+- Spasi di dirname "AI JOB FILTER" merusak systemd ExecStart — gunakan symlink ~/tools/ai-job-filter
+- Port 25 outbound diblokir ISP (tidak bisa kirim email langsung)
+- Qoder trial tidak aktif (server-side anti-abuse) — sudah ditutup
+
+## Reminder
+USER MINTA DIINGATKAN langkah-langkah di atas via Telegram saat buka laptop berikutnya.

@@ -115,14 +115,34 @@ class TelegramListener:
             if notif_id > 0:
                 # Enrich payload so notifier can render score, fallback link
                 # (t.me/c/{source}/{msg}) and fallback summary (PRD F-NOT-1/2).
-                job_row = await self.db_repo.get_job_by_message_id(msg_id) if msg_id else None
-                if job_row:
-                    job_dict["match_score"] = job_row["match_score"]
-                    job_dict["application_url"] = job_dict.get("application_url") or job_row["application_url"]
-                    job_dict["summary"] = job_dict.get("summary") or job_row["summary"]
+                # Use the already-fetched job row for accurate score (get_job_by_message_id
+                # was broken: it expects internal messages.id but received telegram message.id)
+                if job:
+                    # job row now contains full job data (SELECT *) including match_score
+                    job_dict["match_score"] = job["match_score"]
+                    job_dict["application_url"] = job_dict.get("application_url") or job["application_url"]
+                    job_dict["summary"] = job_dict.get("summary") or job["summary"]
+                else:
+                    # Fallback: try fetching by job_id again
+                    job_row = await self.db_repo.get_job(job_id)
+                    if job_row:
+                        job_dict["match_score"] = job_row["match_score"]
+                        job_dict["application_url"] = job_dict.get("application_url") or job_row["application_url"]
+                        job_dict["summary"] = job_dict.get("summary") or job_row["summary"]
+
+                # Fetch source metadata for building t.me links (F-NOT-1 fix)
+                source_row = await self.db_repo.get_source(source_id) if source_id else None
+                source_telegram_id = source_row["telegram_id"] if source_row else None
+                source_username = source_row["username"] if source_row else None
+
+                # Fetch message to get telegram_msg_id (not internal messages.id)
+                message_row = await self.db_repo.get_message(job["message_id"]) if job else None
+                telegram_msg_id = message_row["telegram_msg_id"] if message_row else None
+
                 job_dict["raw_text"] = raw_text
-                job_dict["source_id"] = source_id
-                job_dict["message_id"] = msg_id
+                job_dict["source_telegram_id"] = source_telegram_id
+                job_dict["source_username"] = source_username
+                job_dict["telegram_msg_id"] = telegram_msg_id
                 job_dict.setdefault("classification", classification.value)
                 await self.notifier.send_job_alert(job_dict, notif_id)
 
