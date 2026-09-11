@@ -135,10 +135,7 @@ def has_valid_contacts(contacts: dict) -> bool:
 
     # Check Telegram handles
     handles = contacts.get("telegram_handles") or []
-    if any(is_valid_telegram_handle(h) for h in handles):
-        return True
-
-    return False
+    return any(is_valid_telegram_handle(h) for h in handles)
 
 
 def has_valid_apply_method(
@@ -167,7 +164,4 @@ def has_valid_apply_method(
     if has_valid_contacts(contacts):
         return True
 
-    if can_build_tg_link:
-        return True
-
-    return False
+    return bool(can_build_tg_link)
