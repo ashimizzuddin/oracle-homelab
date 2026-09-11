@@ -9,7 +9,7 @@ from .db.repository import Repository
 from .models.enums import ProcessingStatus
 from .processing.extractor import ExtractorPipeline
 from .processing.pipeline import score_and_save_job
-from .processing.vision import VisionPipeline
+from .processing.vision import VisionPipeline, should_try_text_first
 from .providers.errors import TransientAPIError
 
 logger = structlog.get_logger()
@@ -42,9 +42,14 @@ async def reprocess_failed_messages(
     repo = Repository(conn)
 
     stale_minutes = getattr(config, "stale_pending_minutes", 15)
+    # Unified retry queue: terminal failures, stale legacy PENDING, and the
+    # quota-pending statuses (PENDING_AI / PENDING_VISION / RATE_LIMITED)
+    # which retry_worker also drains.
     query = (
         "SELECT * FROM messages "
-        "WHERE processing_status IN ('EXTRACTION_FAILED', 'VISION_FAILED') "
+        "WHERE processing_status IN ("
+        "'EXTRACTION_FAILED', 'VISION_FAILED', "
+        "'PENDING_AI', 'PENDING_VISION', 'RATE_LIMITED') "
         f"OR (processing_status = 'PENDING' AND scraped_at <= datetime('now', '-{stale_minutes} minutes'))"
     )
     params = []
@@ -53,7 +58,9 @@ async def reprocess_failed_messages(
         query = (
             "SELECT * FROM messages "
             "WHERE id = ? AND ("
-            "processing_status IN ('EXTRACTION_FAILED', 'VISION_FAILED') "
+            "processing_status IN ("
+            "'EXTRACTION_FAILED', 'VISION_FAILED', "
+            "'PENDING_AI', 'PENDING_VISION', 'RATE_LIMITED') "
             f"OR (processing_status = 'PENDING' AND scraped_at <= datetime('now', '-{stale_minutes} minutes'))"
             ")"
         )
@@ -86,7 +93,7 @@ async def reprocess_failed_messages(
             continue
 
         if (
-            status in ("VISION_FAILED", "PENDING")
+            status in ("VISION_FAILED", "PENDING", "PENDING_VISION", "RATE_LIMITED")
             and has_media
             and (not media_path or not os.path.exists(media_path))
         ):
@@ -107,10 +114,31 @@ async def reprocess_failed_messages(
         new_status = status
 
         try:
-            if (status == "VISION_FAILED" or (status == "PENDING" and has_media)) and media_path:
+            use_vision = (
+                status in ("VISION_FAILED", "PENDING_VISION", "RATE_LIMITED")
+                or (status in ("PENDING", "PENDING_AI") and has_media)
+            ) and media_path
+            if use_vision and should_try_text_first(raw_text):
+                # Long caption: spare vision quota, try Groq text first.
+                job_result, new_status = await extractor.run(raw_text)
+                if new_status not in ("PROCESSED", "NOT_JOB"):
+                    job_result, new_status = await vision.run(media_path, raw_text)
+            elif use_vision:
                 job_result, new_status = await vision.run(media_path, raw_text)
             else:
                 job_result, new_status = await extractor.run(raw_text)
+
+            if new_status in ("PENDING_AI", "PENDING_VISION", "RATE_LIMITED"):
+                # Still rate-limited: keep queued WITHOUT consuming retry_count.
+                logger.info("Still rate limited, kept queued", msg_id=msg_id)
+                if execute:
+                    await conn.execute(
+                        "UPDATE messages SET processing_status = ?, "
+                        "last_retry_at = datetime('now') WHERE id = ?",
+                        (new_status, msg_id),
+                    )
+                    await conn.commit()
+                continue
 
             if new_status == "PROCESSED" and job_result:
                 # Memory transformations
@@ -143,11 +171,10 @@ async def reprocess_failed_messages(
             stats.failed += 1
             logger.warning("Transient error during reprocess", msg_id=msg_id, error=str(e))
             if execute:
-                status_to_set = (
-                    "VISION_FAILED"
-                    if status == "VISION_FAILED" or (status == "PENDING" and has_media)
-                    else "EXTRACTION_FAILED"
+                vision_side = status in ("VISION_FAILED", "PENDING_VISION", "RATE_LIMITED") or (
+                    status == "PENDING" and has_media
                 )
+                status_to_set = "VISION_FAILED" if vision_side else "EXTRACTION_FAILED"
                 await conn.execute(
                     "UPDATE messages SET processing_status = ?, retry_count = retry_count + 1, skip_reason = ?, last_retry_at = datetime('now') WHERE id = ?",
                     (
@@ -162,17 +189,14 @@ async def reprocess_failed_messages(
             stats.failed += 1
             logger.warning("Failed to reprocess", msg_id=msg_id, error=str(e))
             if execute:
-                reason = (
-                    "provider_vision_failed"
-                    if status == "VISION_FAILED" or (status == "PENDING" and has_media)
-                    else "provider_extraction_failed"
+                vision_side = status in ("VISION_FAILED", "PENDING_VISION", "RATE_LIMITED") or (
+                    status == "PENDING" and has_media
                 )
+                reason = "provider_vision_failed" if vision_side else "provider_extraction_failed"
                 await conn.execute(
                     "UPDATE messages SET processing_status = ?, retry_count = retry_count + 1, skip_reason = ?, last_retry_at = datetime('now') WHERE id = ?",
                     (
-                        "VISION_FAILED"
-                        if status == "VISION_FAILED" or (status == "PENDING" and has_media)
-                        else "EXTRACTION_FAILED",
+                        "VISION_FAILED" if vision_side else "EXTRACTION_FAILED",
                         reason,
                         msg_id,
                     ),

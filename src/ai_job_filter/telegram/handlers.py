@@ -9,6 +9,7 @@ from ..processing.detector import is_potential_job
 from ..processing.image_hash import compute_dhash, compute_sha256, hamming_distance
 from ..processing.normalizer import compute_text_hash, normalize_text
 from ..processing.pipeline import score_and_save_job
+from ..processing.vision import should_try_text_first
 
 logger = structlog.get_logger()
 
@@ -115,8 +116,19 @@ class MessageHandler:
         status = ProcessingStatus.EXTRACTION_FAILED
 
         if has_media and media_path:
-            job_result, status_str = await self.vision.run(media_path, raw_text)
-            status = status_str
+            # Long captions usually hold the full posting: try the cheaper
+            # Groq text extractor first to spare Gemini vision quota,
+            # falling back to vision when text can't be used.
+            if should_try_text_first(raw_text):
+                job_result, status_str = await self.extractor.run(raw_text)
+                if status_str in ("PROCESSED", "NOT_JOB"):
+                    status = status_str
+                else:
+                    job_result, status_str = await self.vision.run(media_path, raw_text)
+                    status = status_str
+            else:
+                job_result, status_str = await self.vision.run(media_path, raw_text)
+                status = status_str
         else:
             job_result, status_str = await self.extractor.run(raw_text)
             status = status_str

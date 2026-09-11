@@ -8,6 +8,15 @@ from ..providers.errors import ProviderExtractionError, ProviderRateLimitError, 
 
 logger = structlog.get_logger()
 
+# Captions this long usually already contain the full job description, so
+# callers should try the (cheaper, higher-quota) Groq text extractor first
+# and only fall back to Gemini vision when text extraction can't use it.
+TEXT_FIRST_MIN_CHARS = 500
+
+
+def should_try_text_first(caption: str | None) -> bool:
+    return bool(caption) and len(caption) >= TEXT_FIRST_MIN_CHARS
+
 
 # We consider a generic APIError as transient except 429 which we catch specifically in the provider
 class VisionPipeline:

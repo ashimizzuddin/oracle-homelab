@@ -5,17 +5,30 @@ from google.genai.errors import APIError
 from .base import TextProvider, VisionProvider
 from .errors import ProviderExtractionError, ProviderRateLimitError, TransientAPIError
 from .prompts import SYSTEM_PROMPT
+from .rate_budget import GeminiBudget
 
 
 class GeminiProvider(TextProvider, VisionProvider):
-    def __init__(self, model: str, api_key: str | None = None):
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        budget: GeminiBudget | None = None,
+    ):
         self.api_key = api_key
         self.model = model
         self.client = genai.Client(api_key=api_key) if api_key else None
+        # Client-side guard for the small free-tier quota (8 RPM / 18 RPD).
+        # Budget file is only touched lazily on first real API call.
+        self.budget = budget or GeminiBudget()
 
     async def _generate(self, contents: list, schema: type) -> dict | None:
         if not self.api_key or not self.client:
             raise ValueError("Gemini API key required but not configured.")
+
+        allowed, reason = self.budget.allow()
+        if not allowed:
+            raise ProviderRateLimitError(f"Gemini client budget exhausted: {reason}")
 
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -30,12 +43,16 @@ class GeminiProvider(TextProvider, VisionProvider):
             )
 
             text_content = response.text or "{}"
+            # Count the call against the client-side budget only after the
+            # server accepted it (server 429s are tracked via cooldown below).
+            self.budget.record()
             # Let pydantic validate the JSON response string directly
             validated = schema.model_validate_json(text_content)
             return validated.model_dump()
 
         except APIError as e:
             if e.code == 429:
+                self.budget.cooldown_from_error(str(e))
                 raise ProviderRateLimitError(f"Gemini Rate Limit: {e}") from e
             elif e.code in [500, 502, 503, 504]:
                 raise TransientAPIError(f"Gemini Transient Error ({e.code}): {e.message}") from e

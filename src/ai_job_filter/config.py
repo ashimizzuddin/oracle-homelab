@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Model Configuration (static for MVP)
     text_model: str = "llama-3.3-70b-versatile"
     text_provider: str = "groq"
-    vision_model: str = "gemini-2.5-flash"
+    vision_model: str = "gemini-3.5-flash-lite"
     vision_provider: str = "gemini"
 
     # Scoring Thresholds
