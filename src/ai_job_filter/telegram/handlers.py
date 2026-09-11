@@ -111,12 +111,29 @@ class MessageHandler:
             return
 
         # 5. Extraction
+        # Quota saver: image posts with a long text caption try Groq text
+        # extraction first (large quota). Gemini vision (20 RPD) is only used
+        # when the caption alone is not enough.
         job_result = None
         status = ProcessingStatus.EXTRACTION_FAILED
 
         if has_media and media_path:
-            job_result, status_str = await self.vision.run(media_path, raw_text)
-            status = status_str
+            if len(raw_text or "") >= 500:
+                job_result, status_str = await self.extractor.run(raw_text)
+                if status_str == "PROCESSED" and job_result:
+                    status = status_str
+                else:
+                    # Caption insufficient (or Groq limited) -> fall back to vision.
+                    logger.info(
+                        "Caption extraction insufficient, falling back to vision",
+                        msg_id=msg_id,
+                        text_status=status_str,
+                    )
+                    job_result, status_str = await self.vision.run(media_path, raw_text)
+                    status = status_str
+            else:
+                job_result, status_str = await self.vision.run(media_path, raw_text)
+                status = status_str
         else:
             job_result, status_str = await self.extractor.run(raw_text)
             status = status_str
