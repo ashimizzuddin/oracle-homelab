@@ -50,9 +50,6 @@ async def main():
     gemini_provider = GeminiProvider(
         api_key=settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None,
         model=settings.vision_model,
-        max_rpm=settings.gemini_max_rpm,
-        max_rpd=settings.gemini_max_rpd,
-        budget_path=settings.gemini_budget_path,
     )
 
     extractor = ExtractorPipeline(groq_provider)

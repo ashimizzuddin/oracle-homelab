@@ -38,7 +38,10 @@ class JobRebuilder:
         msg_dict = dict(message)
         current_status = msg_dict["processing_status"]
 
-        if current_status in ("NOT_JOB", "SKIPPED", "FAILED") and not force:
+        if (
+            current_status in ("NOT_JOB", "SKIPPED", "EXTRACTION_FAILED", "VISION_FAILED")
+            and not force
+        ):
             return RebuildResult(
                 success=False,
                 error_reason=f"Message status is {current_status}. Use --force to rebuild.",
@@ -72,7 +75,7 @@ class JobRebuilder:
             else:
                 job_result, new_status = await self.extractor.run(raw_text)
 
-            if new_status in ("PENDING_AI", "PENDING_VISION"):
+            if new_status in ("PENDING_AI", "PENDING_VISION", "RATE_LIMITED"):
                 if self.execute:
                     await self.db_repo.update_message_status(
                         message_id, new_status, "transient_api_error_during_rebuild"
@@ -98,12 +101,14 @@ class JobRebuilder:
             logger.exception("rebuild_fatal_error", error=str(e))
             if self.execute:
                 await self.db_repo.update_message_status(
-                    message_id, ProcessingStatus.FAILED.value, str(e)
+                    message_id, ProcessingStatus.EXTRACTION_FAILED.value, str(e)
                 )
             return RebuildResult(
                 success=False,
                 error_reason=f"Fatal error: {e}",
-                status_updated_to=ProcessingStatus.FAILED.value if self.execute else None,
+                status_updated_to=ProcessingStatus.EXTRACTION_FAILED.value
+                if self.execute
+                else None,
             )
 
         if new_status == "NOT_JOB" or (job_result and not job_result.is_job_posting):

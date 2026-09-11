@@ -1,168 +1,146 @@
-"""Client-side budget guard for Gemini free tier.
+"""Client-side guard for the Gemini free-tier quota.
 
-Why this exists: Gemini 2.5 Flash-Lite on this account is limited to
-~10 RPM / 20 RPD (see AI Studio rate-limit dashboard). One image = one
-request, so blind retries burn the whole daily quota in minutes.
+Free tier on this account is small (Flash 5 RPM / 20 RPD, Flash-Lite
+10 RPM / 20 RPD, reset at midnight Pacific). Hitting HTTP 429 repeatedly
+stalls the whole vision queue, so every Gemini call must go through this
+budget first:
 
-Policy (free-first, no paid fallback):
-- RPM sliding window (default 8/min, buffer below the 10 limit).
-- RPD daily counter (default 18/day, buffer below the 20 limit).
-  RPD resets at midnight America/Los_Angeles (Google's documented reset).
-- Cooldown after a 429: honor server RetryInfo when available.
-- Persistence is best-effort JSON so the counter survives restarts.
-  In-memory-only when budget_path is None (used by unit tests).
+- max 8 requests/minute and 18 requests/day (deliberately below the
+  server limits to leave headroom),
+- state persisted in ``data/gemini_budget.json`` so restarts don't lose
+  the counters,
+- server ``retry in Xs`` hints are honoured via :meth:`cooldown_from_error`.
+
+Day boundaries use America/Los_Angeles (falls back to UTC when tzdata is
+unavailable — the 18/20 margin absorbs the skew).
 """
 
-from __future__ import annotations
-
-import asyncio
 import json
 import os
 import re
+import tempfile
 import time
-from collections import deque
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from contextlib import suppress
+from datetime import UTC, datetime
 
-from .errors import ProviderRateLimitError
+try:
+    from zoneinfo import ZoneInfo
 
-PT_TZ = ZoneInfo("America/Los_Angeles")
+    _PACIFIC = ZoneInfo("America/Los_Angeles")
+except Exception:  # pragma: no cover - missing tzdata
+    _PACIFIC = None
 
-# PENDING_* statuses share one vocabulary across worker + reprocess CLI.
-PENDING_STATUSES = ("PENDING_AI", "PENDING_VISION", "RATE_LIMITED")
+DEFAULT_BUDGET_PATH = "data/gemini_budget.json"
+MAX_RPM = 8
+MAX_RPD = 18
+DAY_SECONDS = 24 * 3600
 
-# Terminal failure statuses retried only via manual reprocess CLI.
-FAILED_STATUSES = ("EXTRACTION_FAILED", "VISION_FAILED")
-
-
-def parse_retry_delay_seconds(error_text: str, default: int = 60) -> int:
-    """Extract `retry in Xs` from a Gemini 429 message.
-
-    Example: "Please retry in 27.96s" -> 28. Falls back to default.
-    """
-    m = re.search(r"retry in ([\d.]+)s", error_text or "")
-    if not m:
-        return default
-    try:
-        return max(1, int(float(m.group(1))) + 1)
-    except ValueError:
-        return default
+_RETRY_IN_RE = re.compile(r"retry in (\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
 
 
-def pacific_today_str(now_ts: float | None = None) -> str:
-    dt = datetime.fromtimestamp(now_ts if now_ts is not None else time.time(), tz=PT_TZ)
-    return dt.strftime("%Y-%m-%d")
+def _pacific_today(now: datetime) -> str:
+    if _PACIFIC is not None:
+        return now.astimezone(_PACIFIC).date().isoformat()
+    return now.astimezone(UTC).date().isoformat()
 
 
 class GeminiBudget:
-    """Async-safe RPM + RPD guard with optional JSON persistence."""
+    """Tracks Gemini usage in a small JSON file. No network I/O."""
 
     def __init__(
         self,
-        max_rpm: int = 8,
-        max_rpd: int = 18,
-        budget_path: str | None = None,
+        path: str = DEFAULT_BUDGET_PATH,
+        max_rpm: int = MAX_RPM,
+        max_rpd: int = MAX_RPD,
+        time_fn=time.time,
     ):
+        self.path = path
         self.max_rpm = max_rpm
         self.max_rpd = max_rpd
-        self.budget_path = budget_path
-        self._lock = asyncio.Lock()
-        self._minute_marks: deque[float] = deque()
-        self._day_key = pacific_today_str()
-        self._day_count = 0
-        self.cooldown_until = 0.0
-        self._loaded = False
+        self._time = time_fn
 
-    # -- persistence (best effort, never raise) --
-    def _load(self) -> None:
-        if self._loaded or not self.budget_path:
-            self._loaded = True
-            return
-        self._loaded = True
+    # -- persistence --------------------------------------------------
+    def _load(self) -> dict:
         try:
-            if not os.path.exists(self.budget_path):
-                return
-            with open(self.budget_path, encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("date_pt") == self._day_key:
-                self._day_count = int(data.get("count", 0))
-        except Exception:
-            return
+            with open(self.path, encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                return {}
+            return state
+        except (OSError, ValueError):
+            return {}
 
-    def _save(self) -> None:
-        if not self.budget_path:
-            return
+    def _save(self, state: dict) -> None:
+        directory = os.path.dirname(self.path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=directory or ".", prefix=".gemini_budget-", suffix=".tmp")
         try:
-            parent = os.path.dirname(self.budget_path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            tmp = self.budget_path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"date_pt": self._day_key, "count": self._day_count}, f)
-            os.replace(tmp, self.budget_path)
-        except Exception:
-            return
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+            os.replace(tmp, self.path)
+        except BaseException:
+            with suppress(OSError):
+                os.unlink(tmp)
+            raise
 
-    def _roll_day_if_needed(self) -> None:
-        today = pacific_today_str()
-        if today != self._day_key:
-            self._day_key = today
-            self._day_count = 0
-            self._minute_marks.clear()
+    def _pruned_calls(self, state: dict, now: float) -> list:
+        calls = state.get("calls", [])
+        if not isinstance(calls, list):
+            return []
+        cutoff = now - DAY_SECONDS
+        return [t for t in calls if isinstance(t, (int, float)) and t >= cutoff]
 
-    def _prune_minute(self, now: float) -> None:
-        cutoff = now - 60.0
-        while self._minute_marks and self._minute_marks[0] <= cutoff:
-            self._minute_marks.popleft()
+    # -- public API ---------------------------------------------------
+    def allow(self) -> tuple[bool, str | None]:
+        """Return (ok, reason). ``reason`` is None when a call may proceed."""
+        now = self._time()
+        state = self._load()
+        cooldown_until = state.get("cooldown_until", 0)
+        if isinstance(cooldown_until, (int, float)) and cooldown_until > now:
+            return False, f"cooldown {cooldown_until - now:.0f}s remaining"
 
-    async def acquire(self) -> None:
-        """Reserve one request slot or raise ProviderRateLimitError (no network)."""
-        async with self._lock:
-            self._load()
-            self._roll_day_if_needed()
-            now = time.time()
-            self._prune_minute(now)
+        calls = self._pruned_calls(state, now)
+        recent = [t for t in calls if t >= now - 60]
+        if len(recent) >= self.max_rpm:
+            return False, f"minute budget exhausted ({len(recent)}/{self.max_rpm})"
 
-            if now < self.cooldown_until:
-                wait = int(self.cooldown_until - now) + 1
-                raise ProviderRateLimitError(
-                    f"Gemini client cooldown active, retry in {wait}s "
-                    f"(budget {self._day_count}/{self.max_rpd} today PT)."
-                )
-            if self._day_count >= self.max_rpd:
-                raise ProviderRateLimitError(
-                    f"Gemini daily budget exhausted ({self._day_count}/{self.max_rpd} PT). "
-                    "Queued as PENDING_VISION until midnight Pacific."
-                )
-            if len(self._minute_marks) >= self.max_rpm:
-                oldest = self._minute_marks[0]
-                wait = int(oldest + 60 - now) + 1
-                raise ProviderRateLimitError(
-                    f"Gemini per-minute budget full ({len(self._minute_marks)}/{self.max_rpm}). "
-                    f"Retry in {wait}s."
-                )
+        today = _pacific_today(datetime.fromtimestamp(now, tz=UTC))
+        # Counters reset on Pacific date change; the margin (18/20) absorbs
+        # any skew when tzdata is unavailable (UTC fallback).
+        if state.get("date") != today:
+            daily_count = 0
+        else:
+            today_calls = state.get("today_calls", [])
+            daily_count = len(today_calls) if isinstance(today_calls, list) else 0
+        if daily_count >= self.max_rpd:
+            return False, f"daily budget exhausted ({daily_count}/{self.max_rpd})"
+        return True, None
 
-            self._minute_marks.append(now)
-            self._day_count += 1
-            self._save()
+    def record(self) -> None:
+        """Record one issued Gemini request."""
+        now = self._time()
+        state = self._load()
+        today = _pacific_today(datetime.fromtimestamp(now, tz=UTC))
+        if state.get("date") != today:
+            state["date"] = today
+            state["today_calls"] = []
+        today_calls = state.get("today_calls", [])
+        if not isinstance(today_calls, list):
+            today_calls = []
+        today_calls.append(now)
+        state["today_calls"] = today_calls
+        calls = self._pruned_calls(state, now)
+        calls.append(now)
+        state["calls"] = calls
+        self._save(state)
 
-    async def note_rate_limited(self, retry_after_seconds: int = 60) -> None:
-        """Enter cooldown after a server 429 (called by provider)."""
-        async with self._lock:
-            self.cooldown_until = max(
-                self.cooldown_until, time.time() + max(1, retry_after_seconds)
-            )
-
-    async def status(self) -> dict:
-        async with self._lock:
-            self._load()
-            self._roll_day_if_needed()
-            self._prune_minute(time.time())
-            return {
-                "date_pt": self._day_key,
-                "used_today": self._day_count,
-                "max_rpd": self.max_rpd,
-                "used_minute": len(self._minute_marks),
-                "max_rpm": self.max_rpm,
-                "cooldown_seconds_left": max(0, int(self.cooldown_until - time.time())),
-            }
+    def cooldown_from_error(self, message: str, default_seconds: float = 60.0) -> float:
+        """Set cooldown from a server 429 message honouring ``retry in Xs``."""
+        match = _RETRY_IN_RE.search(message or "")
+        seconds = float(match.group(1)) if match else default_seconds
+        seconds = max(1.0, seconds)
+        state = self._load()
+        state["cooldown_until"] = self._time() + seconds
+        self._save(state)
+        return seconds

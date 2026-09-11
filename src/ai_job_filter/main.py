@@ -1,8 +1,8 @@
 import asyncio
 import contextlib
-import os
 import signal
 import time
+from datetime import UTC, datetime
 
 import structlog
 
@@ -15,7 +15,7 @@ from .models.enums import ProcessingStatus
 from .processing.extractor import ExtractorPipeline
 from .processing.pipeline import score_and_save_job
 from .processing.scorer import Scorer
-from .processing.vision import VisionPipeline
+from .processing.vision import VisionPipeline, should_try_text_first
 from .providers.gemini_provider import GeminiProvider
 from .providers.groq_provider import GroqProvider
 from .telegram.handlers import MessageHandler
@@ -26,150 +26,160 @@ from .web_fetcher.scheduler import web_scheduler
 logger = structlog.get_logger()
 
 
-async def retry_worker(db_repo, handler, notifier, config=None):
-    """Background task to retry PENDING_AI / PENDING_VISION / RATE_LIMITED.
+PENDING_STATUSES = {"PENDING_AI", "PENDING_VISION", "RATE_LIMITED"}
+MAX_RETRIES = 3
+# Quota tuning for the small Gemini free tier (resets midnight Pacific).
+PER_MESSAGE_BACKOFF_SECONDS = 15 * 60  # each message retried at most every 15 min
+VISION_PACING_SECONDS = 7  # minimum gap between vision calls
+CIRCUIT_BREAKER_THRESHOLD = 3  # consecutive rate-limits before breaker opens
+CIRCUIT_BREAKER_SLEEP_SECONDS = 30 * 60  # breaker sleep
+RETRY_POLL_SECONDS = 60  # queue poll interval
 
-    Quota-aware (Gemini free tier ~10 RPM / 20 RPD):
-    - PENDING_* results do NOT consume retry_count; only last_retry_at is
-      touched. retry_count is reserved for real terminal failures.
-    - Per-message backoff (default 15 min) + per-item pacing (default 7s)
-      + circuit breaker (30 min) after consecutive rate limits.
-    - Missing media files are skipped without burning quota or retries.
+
+def _backoff_expired(last_retry_at: str | None) -> bool:
+    """True when a message is due for another attempt (15 min per-message backoff)."""
+    if not last_retry_at:
+        return True
+    try:
+        last = datetime.fromisoformat(last_retry_at)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        elapsed = (datetime.now(UTC) - last).total_seconds()
+        return elapsed >= PER_MESSAGE_BACKOFF_SECONDS
+    except (ValueError, TypeError):
+        return True
+
+
+async def retry_worker(db_repo, handler, notifier):
+    """Background task to retry PENDING_AI / PENDING_VISION / RATE_LIMITED messages.
+
+    Quota-friendly: PENDING_* outcomes never consume retry_count, each
+    message backs off 15 minutes between attempts, vision calls are paced
+    7 seconds apart, and 3 consecutive rate-limits open a 30 minute
+    circuit breaker.
     """
-    from .providers.rate_budget import PENDING_STATUSES
-
-    base_delay = getattr(config, "retry_base_delay_seconds", 300)
-    per_item_delay = getattr(config, "retry_per_item_delay_seconds", 7)
-    msg_backoff = getattr(config, "retry_per_message_backoff_seconds", 900)
-    max_attempts = getattr(config, "retry_max_attempts", 5)
-
-    consecutive_limited = 0
+    consecutive_rate_limited = 0
+    last_vision_monotonic = 0.0
 
     while True:
         try:
-            pending = await db_repo.find_pending_messages()
-            processed_any = False
+            if consecutive_rate_limited >= CIRCUIT_BREAKER_THRESHOLD:
+                logger.warning("Circuit breaker open: sleeping after repeated rate limits")
+                await asyncio.sleep(CIRCUIT_BREAKER_SLEEP_SECONDS)
+                consecutive_rate_limited = 0
+                continue
 
+            pending = await db_repo.find_pending_messages()
             for msg in pending:
                 msg_id = msg["id"]
-
-                if msg["retry_count"] >= max_attempts:
+                # Only hard failures consume retries; PENDING_* never increments
+                # retry_count (see below), so this caps genuinely broken items.
+                if msg["retry_count"] >= MAX_RETRIES:
                     await db_repo.update_message_status(
                         msg_id, ProcessingStatus.EXTRACTION_FAILED, "Max retries reached"
                     )
                     continue
 
-                # Per-message backoff: don't hammer the same row every loop.
-                last_retry = msg["last_retry_at"]
-                if last_retry:
-                    try:
-                        # SQLite datetime('now') -> 'YYYY-MM-DD HH:MM:SS' (UTC).
-                        last_ts = time.mktime(
-                            time.strptime(str(last_retry)[:19], "%Y-%m-%d %H:%M:%S")
-                        )
-                        if time.time() - last_ts < msg_backoff:
-                            continue
-                    except (ValueError, TypeError, OverflowError):
-                        pass
+                if not _backoff_expired(msg["last_retry_at"]):
+                    continue
+
+                logger.info(f"Retrying message {msg_id}")
 
                 raw_text = msg["raw_text"]
                 has_media = msg["has_media"]
                 media_path = msg["media_path"]
 
-                use_vision = bool(has_media and media_path)
-                if use_vision and not os.path.exists(media_path):
-                    # File was deleted after first attempt (handlers.py cleanup).
-                    # Keep queued without burning quota/retries; manual
-                    # reprocess CLI will mark it SKIPPED if truly unavailable.
-                    logger.info("Retry skipped: media file gone", msg_id=msg_id)
-                    async with db_repo.write_lock:
-                        await db_repo.conn.execute(
-                            "UPDATE messages SET last_retry_at = datetime('now') WHERE id = ?",
-                            (msg_id,),
-                        )
-                        await db_repo.conn.commit()
-                    continue
-
-                logger.info(f"Retrying message {msg_id}")
-
-                if use_vision:
-                    job_result, status = await handler.vision.run(media_path, raw_text)
+                job_result, status = None, None
+                if has_media and media_path:
+                    # Long captions: try Groq text first to spare vision quota.
+                    if should_try_text_first(raw_text):
+                        job_result, status = await handler.extractor.run(raw_text)
+                    if status not in ("PROCESSED", "NOT_JOB"):
+                        wait = VISION_PACING_SECONDS - (time.monotonic() - last_vision_monotonic)
+                        if wait > 0:
+                            await asyncio.sleep(wait)
+                        job_result, status = await handler.vision.run(media_path, raw_text)
+                        last_vision_monotonic = time.monotonic()
                 else:
                     job_result, status = await handler.extractor.run(raw_text)
 
                 if status in PENDING_STATUSES:
-                    # Still quota-limited: touch timestamp only, keep retry_count.
-                    consecutive_limited += 1
+                    # Still rate-limited: keep queued WITHOUT consuming
+                    # retry_count; stamp last_retry_at for the backoff.
                     async with db_repo.write_lock:
                         await db_repo.conn.execute(
-                            "UPDATE messages SET last_retry_at = datetime('now') WHERE id = ?",
-                            (msg_id,),
+                            "UPDATE messages SET processing_status = ?, "
+                            "last_retry_at = datetime('now') WHERE id = ?",
+                            (status, msg_id),
                         )
                         await db_repo.conn.commit()
-                    await db_repo.update_message_status(msg_id, status)
-                    # Pace vision calls under the RPM budget.
-                    if use_vision:
-                        await asyncio.sleep(per_item_delay)
+                    consecutive_rate_limited += 1
                     continue
 
-                consecutive_limited = 0
-                processed_any = True
+                consecutive_rate_limited = 0
+
+                if status == "NOT_JOB":
+                    await db_repo.update_message_status(msg_id, status)
+                    continue
 
                 if status == "PROCESSED" and job_result:
-                    async with db_repo.write_lock:
-                        await db_repo.conn.execute(
-                            "UPDATE messages SET retry_count = 0, last_retry_at = datetime('now') WHERE id = ?",
-                            (msg_id,),
-                        )
-                        await db_repo.conn.commit()
-                    await db_repo.update_message_status(msg_id, status)
                     # PRD F-DED-2: retry path must reuse the real pipeline so
                     # content_hash, dedup and score_breakdown stay consistent
                     # (was: content_hash="retried" hardcoded, broke dedup).
+                    async with db_repo.write_lock:
+                        await db_repo.conn.execute(
+                            "UPDATE messages SET processing_status = ?, retry_count = 0, "
+                            "last_retry_at = datetime('now') WHERE id = ?",
+                            (ProcessingStatus.PROCESSED.value, msg_id),
+                        )
+                        await db_repo.conn.commit()
                     job_id, score, classification = await score_and_save_job(
                         db_repo, handler.scorer, msg_id, msg["source_id"], raw_text, job_result
                     )
                     if classification.value in ["APPLY", "REVIEW"]:
                         notif_id = await db_repo.insert_notification(job_id, notifier.user_chat_id)
                         if notif_id > 0:
+                            # Fetch source metadata for t.me links (same as listener)
+                            source_row = (
+                                await db_repo.get_source(msg["source_id"])
+                                if msg["source_id"]
+                                else None
+                            )
+                            source_telegram_id = source_row["telegram_id"] if source_row else None
+                            source_username = source_row["username"] if source_row else None
+                            telegram_msg_id = msg["telegram_msg_id"]
+
                             payload = job_result.model_dump()
                             payload["match_score"] = score
                             payload["classification"] = classification.value
                             payload["raw_text"] = raw_text
-                            payload["message_id"] = msg_id
-                            payload["source_id"] = msg["source_id"]
+                            payload["source_telegram_id"] = source_telegram_id
+                            payload["source_username"] = source_username
+                            payload["telegram_msg_id"] = telegram_msg_id
                             await notifier.send_job_alert(payload, notif_id)
-                else:
-                    # Terminal failure for this attempt: count it.
-                    async with db_repo.write_lock:
-                        await db_repo.conn.execute(
-                            "UPDATE messages SET retry_count = retry_count + 1, last_retry_at = datetime('now') WHERE id = ?",
-                            (msg_id,),
-                        )
-                        await db_repo.conn.commit()
-                    await db_repo.update_message_status(msg_id, status)
+                    continue
 
-                if use_vision:
-                    await asyncio.sleep(per_item_delay)
-
-            # Circuit breaker: sustained 429s -> sleep 30 min (quota resets
-            # at midnight Pacific; tight loops only burn RPD faster).
-            if consecutive_limited >= 3:
-                logger.warning(
-                    "Retry worker circuit breaker: sustained rate limits, sleeping 30m",
-                    consecutive=consecutive_limited,
+                # Hard failure (extraction/vision failed): consumes one retry.
+                failed_status = (
+                    ProcessingStatus.VISION_FAILED
+                    if (has_media and media_path)
+                    else ProcessingStatus.EXTRACTION_FAILED
                 )
-                consecutive_limited = 0
-                await asyncio.sleep(1800)
-            elif processed_any:
-                await asyncio.sleep(60)
-            else:
-                await asyncio.sleep(base_delay)
+                async with db_repo.write_lock:
+                    await db_repo.conn.execute(
+                        "UPDATE messages SET retry_count = retry_count + 1, "
+                        "last_retry_at = datetime('now') WHERE id = ?",
+                        (msg_id,),
+                    )
+                    await db_repo.conn.commit()
+                await db_repo.update_message_status(msg_id, failed_status)
+
+            await asyncio.sleep(RETRY_POLL_SECONDS)  # Wait a minute before checking again
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error("Error in retry worker", error=str(e))
-            await asyncio.sleep(base_delay)
+            await asyncio.sleep(RETRY_POLL_SECONDS)
 
 
 async def run():
@@ -189,9 +199,6 @@ async def run():
     gemini_provider = GeminiProvider(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
         model=config.vision_model,
-        max_rpm=config.gemini_max_rpm,
-        max_rpd=config.gemini_max_rpd,
-        budget_path=config.gemini_budget_path,
     )
 
     extractor = ExtractorPipeline(groq_provider)
@@ -224,7 +231,7 @@ async def run():
             await notifier.app.updater.start_polling()
 
     # Start Background Retry Worker
-    worker_task = asyncio.create_task(retry_worker(db_repo, handler, notifier, config))
+    worker_task = asyncio.create_task(retry_worker(db_repo, handler, notifier))
 
     # Start Web Scheduler (PRD F-WEB-4: daily at 07:00, 11 boards)
     web_task = asyncio.create_task(web_scheduler(db_repo, extractor, scorer, config, notifier))

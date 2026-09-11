@@ -31,21 +31,8 @@ class Settings(BaseSettings):
     # Model Configuration (static for MVP)
     text_model: str = "llama-3.3-70b-versatile"
     text_provider: str = "groq"
-    vision_model: str = "gemini-2.5-flash-lite"
+    vision_model: str = "gemini-3.5-flash-lite"
     vision_provider: str = "gemini"
-
-    # Gemini free-tier guards (see AI Studio rate-limit dashboard).
-    # Account quota observed: 10 RPM / 20 RPD -> keep a buffer below it.
-    # RPD resets at midnight America/Los_Angeles.
-    gemini_max_rpm: int = 8
-    gemini_max_rpd: int = 18
-    gemini_budget_path: str = "data/gemini_budget.json"
-
-    # Retry worker pacing (avoid hammering the 10 RPM / 20 RPD quota).
-    retry_base_delay_seconds: int = 300
-    retry_per_item_delay_seconds: int = 7
-    retry_per_message_backoff_seconds: int = 900
-    retry_max_attempts: int = 3
 
     # Scoring Thresholds
     min_score_apply: int = 75

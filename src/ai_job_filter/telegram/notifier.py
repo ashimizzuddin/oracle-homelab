@@ -9,9 +9,6 @@ from ..config import Settings
 
 logger = structlog.get_logger()
 
-# PRD F-NOT-1, F-NOT-2, F-NOT-3: notif always has link + summary + hidden empty salary
-MIN_SCORE_TO_NOTIFY = 55
-
 
 class TelegramNotifier:
     def __init__(self, config: Settings, db_repo):
@@ -21,6 +18,8 @@ class TelegramNotifier:
         self.user_chat_id = config.user_chat_id
         self.authorized_user_id = config.authorized_user_id
         self.dry_run = config.dry_run
+        # PRD F-NOT-1, F-NOT-2, F-NOT-3: notif always has link + summary + hidden empty salary
+        self.min_score_to_notify = config.min_score_review
 
         if config.telegram_bot_token and self.user_chat_id:
             token = config.telegram_bot_token.get_secret_value()
@@ -67,31 +66,97 @@ class TelegramNotifier:
         logger.info("User action recorded", notif_id=notif_id, action=db_action)
 
     @staticmethod
-    def _build_telegram_link(source_id: int | None, message_id: int | None) -> str | None:
+    def _build_telegram_link(
+        telegram_id: int | None, username: str | None, message_id: int | None
+    ) -> str | None:
         """Build t.me deep link to the original Telegram message (F-NOT-1).
 
-        Telegram supergroup channel IDs are negative and start with -100.
-        Chat IDs for groups/channels follow pattern -100XXXXXXXXXX.
+        Args:
+            telegram_id: Telegram's raw ID (negative for supergroups/channels)
+            username: Channel/group username (e.g. "LowonganKerjaIT")
+            message_id: Telegram message ID
+
+        Returns:
+            https://t.me/c/{stripped_id}/{msg_id} for negative IDs,
+            https://t.me/{username}/{msg_id} for usernames,
+            None if unable to build.
         """
-        if source_id is None or message_id is None:
+        if message_id is None:
             return None
-        try:
-            sid = int(source_id)
-        except (TypeError, ValueError):
-            return None
-        if sid < 0:
-            stripped = str(-sid)
-            if stripped.startswith("100"):
-                stripped = stripped[3:]
-            return f"https://t.me/c/{stripped}/{message_id}"
+
+        # Priority 1: Use username if available (more user-friendly)
+        if username and isinstance(username, str):
+            clean_username = username.strip().lstrip("@")
+            if clean_username:
+                return f"https://t.me/{clean_username}/{message_id}"
+
+        # Priority 2: Use negative telegram_id for supergroups/channels
+        if telegram_id is not None:
+            try:
+                tid = int(telegram_id)
+                if tid < 0:
+                    stripped = str(-tid)
+                    if stripped.startswith("100"):
+                        stripped = stripped[3:]
+                    return f"https://t.me/c/{stripped}/{message_id}"
+            except (TypeError, ValueError):
+                pass
+
         return None
+
+    @staticmethod
+    def _render_contacts(contacts: dict | None) -> list[str]:
+        """Render valid contacts as clickable HTML links (Opsi B).
+
+        Returns list of formatted contact strings with mailto:, tel:, wa.me, t.me links.
+        """
+        from ..processing.apply_method import (
+            is_valid_email,
+            is_valid_phone,
+            is_valid_telegram_handle,
+        )
+
+        if not contacts or not isinstance(contacts, dict):
+            return []
+
+        rendered = []
+
+        # Emails -> mailto:
+        emails = contacts.get("emails") or []
+        for email in emails:
+            if is_valid_email(email):
+                rendered.append(f'<a href="mailto:{escape(email)}">📧 {escape(email)}</a>')
+
+        # Phone numbers -> tel:
+        phones = contacts.get("phone_numbers") or []
+        for phone in phones:
+            if is_valid_phone(phone):
+                normalized = phone.strip()
+                rendered.append(f'<a href="tel:{escape(normalized)}">📱 {escape(normalized)}</a>')
+
+        # WhatsApp -> wa.me
+        whatsapp = contacts.get("whatsapp") or []
+        for wa in whatsapp:
+            if is_valid_phone(wa):
+                # wa.me expects international format without + or spaces
+                normalized = wa.strip().lstrip("+").replace(" ", "").replace("-", "")
+                rendered.append(f'<a href="https://wa.me/{normalized}">💬 WA: {escape(wa)}</a>')
+
+        # Telegram handles -> t.me
+        handles = contacts.get("telegram_handles") or []
+        for handle in handles:
+            if is_valid_telegram_handle(handle):
+                clean = handle.strip().lstrip("@")
+                rendered.append(f'<a href="https://t.me/{clean}">✈️ @{escape(clean)}</a>')
+
+        return rendered
 
     async def send_job_alert(self, job_dict: dict, notification_id: int):
         score = job_dict.get("match_score", 0)
 
         # F-NOT-4: skip IGNORE classification
         classification = (job_dict.get("classification") or "").upper()
-        if classification == "IGNORE" or score < MIN_SCORE_TO_NOTIFY:
+        if classification == "IGNORE" or score < self.min_score_to_notify:
             logger.info(
                 "Skipping notification (below threshold)",
                 score=score,
@@ -101,8 +166,8 @@ class TelegramNotifier:
             return
 
         # Header: F-NOT-5 emoji X/100 | title
-        title = escape(job_dict.get("title", "Unknown Role"))
-        company = escape(job_dict.get("company", "Unknown Company"))
+        title = escape(job_dict.get("title") or "Unknown Role")
+        company = escape(job_dict.get("company") or "Unknown Company")
 
         msg = f"🌟 <b>{score}/100 | {title}</b>\n"
         msg += f"🏢 {company}\n"
@@ -135,14 +200,30 @@ class TelegramNotifier:
             else:
                 msg += "\n"
 
-        # F-NOT-1: application_url, else Telegram source link
+        # F-NOT-1 + Opsi B: application_url, else t.me link, else render contacts
         url = (job_dict.get("application_url") or "").strip()
-        if not url:
+        if url:
+            msg += f'🔗 <a href="{escape(url)}">{escape(url)}</a>\n'
+        else:
+            # Try building Telegram link (needs telegram_id + username from source)
             tg_link = self._build_telegram_link(
-                job_dict.get("source_id"), job_dict.get("message_id")
+                job_dict.get("source_telegram_id"),
+                job_dict.get("source_username"),
+                job_dict.get("telegram_msg_id"),
             )
-            url = tg_link or "See contacts in raw message"
-        msg += f"🔗 {escape(url)}"
+            if tg_link:
+                msg += f'🔗 <a href="{tg_link}">View in Telegram</a>\n'
+            else:
+                msg += "🔗 No direct link\n"
+
+            # Render contacts as clickable links (Opsi B)
+            contacts = job_dict.get("contacts")
+            contact_links = self._render_contacts(contacts)
+            if contact_links:
+                for link in contact_links:
+                    msg += f"{link}\n"
+            else:
+                msg += "📝 Check raw message for contact info\n"
 
         keyboard = [
             [
