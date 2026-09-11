@@ -1,0 +1,20 @@
+services:
+  ai-job-filter:
+    build: .
+    image: ai-job-filter:latest
+    container_name: ai-job-filter
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # SQLite DB + budget counters + downloads survive rebuilds
+      - ./data:/app/data
+      - ./downloads:/app/downloads
+      # Editable without rebuild: candidate profile + fetcher config
+      - ./candidate_profile.yaml:/app/candidate_profile.yaml:ro
+      - ./config/web_fetchers.yaml:/app/config/web_fetchers.yaml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

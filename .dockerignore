@@ -1,0 +1,31 @@
+# Secrets — never baked into the image
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+
+# Runtime state — mounted as volumes, not copied
+data/
+downloads/
+*.db
+*.db-wal
+*.db-shm
+*_seen.json
+
+# Local dev only
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.git/
+.gitignore
+.opencode/node_modules/
+test_fixtures/
+tests/
+docs/
+*.md
+Dockerfile
+compose.yaml
+.dockerignore
