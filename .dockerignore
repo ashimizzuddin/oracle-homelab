@@ -26,6 +26,8 @@ test_fixtures/
 tests/
 docs/
 *.md
+# ...except the one hatchling needs for project metadata (pyproject readme)
+!README.md
 Dockerfile
 compose.yaml
 .dockerignore
