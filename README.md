@@ -1,5 +1,7 @@
 # AI JOB FILTER
 
+[![CI](https://github.com/ashimizzuddin/oracle-homelab/actions/workflows/ci.yml/badge.svg)](https://github.com/ashimizzuddin/oracle-homelab/actions/workflows/ci.yml)
+
 A personal Telegram job filtering and scoring daemon.
 
 ## Project Purpose
@@ -14,23 +16,28 @@ This application monitors specified Telegram groups and channels for job posting
 - **Notification**: Telegram Bot API (duplicate-job alerts suppressed; rows kept as audit trail)
 
 ## Current Status
-**PRODUCTION — Running as systemd service.** Core pipeline (detection → dedup → extraction → scoring → notification) is working, covered by a test suite. Web scheduler ingests 8 job boards daily at 07:00 (talentics, dealls, techinasia, kitalulus, glints, kalibrr, karircom, topkarir). Telegram listener monitors `@LowonganKerjaIT`, `@joinkerjatalenthub`, `@devopsindonesia` in real-time.
+**PRODUCTION — Running as Docker container on Oracle VPS (ARM64).** Core pipeline (detection → dedup → extraction → scoring → notification) is working, covered by a test suite. Web scheduler ingests 8 job boards daily at 07:00 (talentics, dealls, techinasia, kitalulus, glints, kalibrr, karircom, topkarir). Telegram listener monitors `@LowonganKerjaIT`, `@joinkerjatalenthub`, `@devopsindonesia` in real-time.
+
+CI pushes a new `ghcr.io/ashimizzuddin/ai-job-filter:latest` image on every merge to `main`.
 
 ## Deployment (VPS)
-Runs as a systemd service with auto-restart:
+Runs as a Docker container with auto-restart (`restart: unless-stopped`).
+
+Image: `ghcr.io/ashimizzuddin/ai-job-filter:latest` (ARM64, built by CI via QEMU cross-build).
 
 ```bash
-# Service management
-sudo systemctl status ai-job-filter.service
-sudo systemctl restart ai-job-filter.service
-sudo journalctl -u ai-job-filter -f
+# On VPS — pull latest image and restart
+docker compose pull && docker compose up -d
 
-# Application logs
-sudo tail -f /var/log/ai-job-filter.log
-sudo tail -f /var/log/ai-job-filter-error.log
+# Logs
+docker compose logs -f
+
+# One-off shell into running container
+docker compose exec ai-job-filter bash
 ```
 
-Service definition: `/etc/systemd/system/ai-job-filter.service` (User=ubuntu, WorkingDirectory=/home/ubuntu/ai-job-filter, Restart=always, RestartSec=10).
+Volumes: `./data` → `/app/data` (SQLite DB), `./downloads` → `/app/downloads`.
+Env vars loaded from `.env` in the compose working directory (`/home/ubuntu/ai-job-filter`).
 
 ### Configuration (.env)
 Key settings:
@@ -61,7 +68,7 @@ sqlite3 data/jobs.db "SELECT n.id, j.title, j.match_score, n.sent_at FROM notifi
 ```
 
 ## MVP Scope
-The MVP focuses on a $0-cost operating model using local SQLite, Python asyncio, Telethon, and free-tier APIs (Groq/Gemini). It includes text and image processing, deductive filtering, and deterministic scoring. It does NOT include auto-applying, web dashboards, or heavy infrastructure (PostgreSQL/Redis/Docker).
+Focuses on a $0-cost operating model using local SQLite, Python asyncio, Telethon, and free-tier APIs (Groq/Gemini). Packaged as a single Docker container (ARM64) deployed on Oracle VPS Free Tier. Includes text and image processing, deductive filtering, and deterministic scoring. Does NOT include auto-applying or web dashboards.
 
 ## Getting Started for Developers / Agents
 If you are an AI agent continuing this project, **STOP** and read `docs/HANDOFF.md` and `docs/architecture-decision-record-v1.1.md` before making any modifications.
