@@ -57,7 +57,9 @@ def http_get(url: str) -> str:
 def extract_slugs(list_html: str) -> list[dict]:
     """Extract job slugs + titles from the /jobs listing page."""
     # Pattern: href="https://career.sevima.com/jobs/{slug}" — exclude /apply
-    links = sorted(set(re.findall(r'href="(https://career\.sevima\.com/jobs/[a-z0-9-]+)"', list_html)))
+    links = sorted(
+        set(re.findall(r'href="(https://career\.sevima\.com/jobs/[a-z0-9-]+)"', list_html))
+    )
     out = []
     for url in links:
         slug = url.rsplit("/", 1)[-1]
@@ -117,7 +119,9 @@ def parse_detail(text: str) -> dict:
 
     # Description: from "Deskripsi Pekerjaan" until "Lamar Pekerjaan"/"Waspada"
     start = text.find("Deskripsi Pekerjaan")
-    end_candidates = [i for i in (text.find("Lamar Pekerjaan"), text.find("Waspada Penipuan")) if i > start]
+    end_candidates = [
+        i for i in (text.find("Lamar Pekerjaan"), text.find("Waspada Penipuan")) if i > start
+    ]
     if start >= 0:
         end = min(end_candidates) if end_candidates else start + 6000
         desc_block = text[start:end]
@@ -134,7 +138,9 @@ def parse_detail(text: str) -> dict:
         for line in lines:
             if line in skip:
                 continue
-            if out["employment_type"] != "unknown" and line.lower() == out["employment_type"].replace("-", ""):
+            if out["employment_type"] != "unknown" and line.lower() == out[
+                "employment_type"
+            ].replace("-", ""):
                 continue
             if out["location"] is None and re.match(r"^[A-Z][a-zA-Z]+, Jawa", line):
                 out["location"] = line
@@ -176,10 +182,18 @@ def build_candidate(slug_data: dict, detail: dict, title: str) -> dict:
 
 async def main():
     parser = argparse.ArgumentParser(description="SEVIMA career page fetcher")
-    parser.add_argument("--dry-run", action="store_true", default=True,
-                        help="Emit candidate JSONs without ingesting (default)")
-    parser.add_argument("--execute", action="store_false", dest="dry_run",
-                        help="Feed candidates into ingest_web_candidate.py --execute")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=True,
+        help="Emit candidate JSONs without ingesting (default)",
+    )
+    parser.add_argument(
+        "--execute",
+        action="store_false",
+        dest="dry_run",
+        help="Feed candidates into ingest_web_candidate.py --execute",
+    )
     parser.add_argument("--limit", type=int, default=0, help="Max new postings to process (0=all)")
     args = parser.parse_args()
 
@@ -218,8 +232,10 @@ async def main():
                 cmd = [
                     sys.executable,
                     str(Path(__file__).parent / "ingest_web_candidate.py"),
-                    "--file", str(out_file),
-                    "--execute", "--json-output",
+                    "--file",
+                    str(out_file),
+                    "--execute",
+                    "--json-output",
                 ]
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
                 tail = proc.stdout.strip().splitlines()[-1:] or ["(no output)"]

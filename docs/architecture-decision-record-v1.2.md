@@ -710,12 +710,16 @@ CREATE INDEX IF NOT EXISTS idx_jobs_title_company ON jobs(title, company)
 # providers/base.py — Simple Python Protocol, not a framework
 from typing import Protocol
 
+
 class TextProvider(Protocol):
     """Extracts structured job data from text."""
+
     async def extract_job(self, text: str, schema: type) -> dict | None: ...
+
 
 class VisionProvider(Protocol):
     """Extracts structured job data from an image."""
+
     async def extract_from_image(self, image_path: str, schema: type) -> dict | None: ...
 ```
 
@@ -765,11 +769,11 @@ async def process_message(msg, repo, text_provider):
     try:
         result = await text_provider.extract_job(msg.text, JobExtractionResult)
         if result is None:
-            await repo.update_status(msg.id, 'EXTRACTION_FAILED')
+            await repo.update_status(msg.id, "EXTRACTION_FAILED")
             return
         # ... proceed with scoring
     except RateLimitError:
-        await repo.update_status(msg.id, 'PENDING_AI')
+        await repo.update_status(msg.id, "PENDING_AI")
         # Will be retried by periodic retry task
         return
 ```
@@ -788,7 +792,7 @@ response = await client.chat.completions.create(
     response_format={"type": "json_object"},
     messages=[
         {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-        {"role": "user", "content": raw_text}
+        {"role": "user", "content": raw_text},
     ],
     temperature=0.0,
 )
@@ -808,10 +812,9 @@ response = await client.aio.models.generate_content(
     model=settings.VISION_MODEL,
     contents=[
         {"text": VISION_SYSTEM_PROMPT},
-        {"inline_data": {"mime_type": "image/jpeg", "data": image_bytes}}
+        {"inline_data": {"mime_type": "image/jpeg", "data": image_bytes}},
     ],
-    config={"response_mime_type": "application/json",
-            "response_schema": JobExtractionResult}
+    config={"response_mime_type": "application/json", "response_schema": JobExtractionResult},
 )
 ```
 
@@ -834,25 +837,36 @@ class CandidateProfile:
 
     # Strong areas (learned/practiced, not professionally employed)
     strong_areas: list[str] = [
-        "Linux", "System Administration", "RHEL",
-        "Networking", "Bash Scripting", "CLI Tools",
-        "VMware", "Virtualization", "Kali Linux",
+        "Linux",
+        "System Administration",
+        "RHEL",
+        "Networking",
+        "Bash Scripting",
+        "CLI Tools",
+        "VMware",
+        "Virtualization",
+        "Kali Linux",
     ]
 
     # Career direction
     career_direction: list[str] = [
-        "Cybersecurity", "Information Security",
-        "SOC Analyst", "Penetration Testing",
-        "Bug Bounty", "Infrastructure Security",
-        "Security Engineering", "Security Operations",
+        "Cybersecurity",
+        "Information Security",
+        "SOC Analyst",
+        "Penetration Testing",
+        "Bug Bounty",
+        "Infrastructure Security",
+        "Security Engineering",
+        "Security Operations",
     ]
 
     # Target roles
     target_roles: list[str] = [
         "Junior System Administrator",
         "Junior Linux Administrator",
-        "IT Support", "Help Desk",
-        "IT Staff",                          # NEW: entry-level in Indonesia
+        "IT Support",
+        "Help Desk",
+        "IT Staff",  # NEW: entry-level in Indonesia
         "Junior SOC Analyst",
         "Junior Security Analyst",
         "Network Administrator",
@@ -863,16 +877,22 @@ class CandidateProfile:
     ]
 
     # Target experience levels
-    target_experience_levels: list[str] = [
-        "entry_level", "junior", "not_specified"
-    ]
+    target_experience_levels: list[str] = ["entry_level", "junior", "not_specified"]
 
     # Negative title signals (CHANGED from v1.0)
     # "Staff" REMOVED — "IT Staff" is entry-level in Indonesia
     negative_title_signals: list[str] = [
-        "Senior", "Lead", "Principal",
-        "Manager", "Director", "Head of",
-        "VP", "Chief", "CTO", "CIO", "CISO",
+        "Senior",
+        "Lead",
+        "Principal",
+        "Manager",
+        "Director",
+        "Head of",
+        "VP",
+        "Chief",
+        "CTO",
+        "CIO",
+        "CISO",
     ]
 
     # Workplace & location
@@ -1042,26 +1062,29 @@ flowchart TD
 ```python
 from PIL import Image
 
+
 def compute_dhash(image_path: str, hash_size: int = 8) -> str:
     """Compute difference hash. Returns hex string."""
-    img = Image.open(image_path).convert('L')  # Grayscale
+    img = Image.open(image_path).convert("L")  # Grayscale
     img = img.resize((hash_size + 1, hash_size), Image.LANCZOS)
     pixels = list(img.getdata())
-    
+
     bits = []
     for row in range(hash_size):
         for col in range(hash_size):
             idx = row * (hash_size + 1) + col
             bits.append(1 if pixels[idx] < pixels[idx + 1] else 0)
-    
+
     # Convert to hex string
     hash_int = sum(b << i for i, b in enumerate(bits))
     return f"{hash_int:016x}"
 
+
 def hamming_distance(hash1: str, hash2: str) -> int:
     """Count differing bits between two hex hash strings."""
     h1, h2 = int(hash1, 16), int(hash2, 16)
-    return bin(h1 ^ h2).count('1')
+    return bin(h1 ^ h2).count("1")
+
 
 # Usage: hamming_distance <= 5 means visually similar
 ```
@@ -1075,10 +1098,15 @@ After LLM extraction, compare against recent jobs (30 days). The primary identit
 
 # Generic career page patterns — these are NOT vacancy-specific
 GENERIC_URL_PATTERNS = [
-    r"/careers/?$", r"/jobs/?$", r"/career/?$",
-    r"/join-us/?$", r"/vacancies/?$", r"/lowongan/?$",
-    r"/karir/?$",   # Indonesian for "career"
+    r"/careers/?$",
+    r"/jobs/?$",
+    r"/career/?$",
+    r"/join-us/?$",
+    r"/vacancies/?$",
+    r"/lowongan/?$",
+    r"/karir/?$",  # Indonesian for "career"
 ]
+
 
 def is_vacancy_specific_url(url: str) -> bool:
     """Returns True if the URL identifies a specific job vacancy,
@@ -1091,16 +1119,24 @@ def is_vacancy_specific_url(url: str) -> bool:
             return False
     return True
 
+
 existing = repo.find_recent_jobs(days=30)
 for job in existing:
     title_sim = fuzz.token_set_ratio(normalize(new_job.title), normalize(job.title))
-    company_sim = fuzz.token_set_ratio(normalize(new_job.company or ""), normalize(job.company or ""))
-    location_sim = fuzz.token_set_ratio(normalize(new_job.location or ""), normalize(job.location or ""))
+    company_sim = fuzz.token_set_ratio(
+        normalize(new_job.company or ""), normalize(job.company or "")
+    )
+    location_sim = fuzz.token_set_ratio(
+        normalize(new_job.location or ""), normalize(job.location or "")
+    )
 
     # Strong supporting signal: identical vacancy-specific application URL
-    if (new_job.application_url and job.application_url
-            and is_vacancy_specific_url(new_job.application_url)
-            and is_vacancy_specific_url(job.application_url)):
+    if (
+        new_job.application_url
+        and job.application_url
+        and is_vacancy_specific_url(new_job.application_url)
+        and is_vacancy_specific_url(job.application_url)
+    ):
         if normalize_url(new_job.application_url) == normalize_url(job.application_url):
             mark_duplicate(new_job, parent=job, method="job_level_url")
             break

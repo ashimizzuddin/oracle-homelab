@@ -63,8 +63,10 @@ async def main():
             db_repo, extractor, scorer, fetcher, dry_run=dry_run, limit=args.limit
         )
         total += ingested
-        print(f"[{fetcher.source}] found={stats['found']} fetched={stats['fetched']} "
-              f"new={stats['new']} ingested={ingested} failed={stats['failed']}")
+        print(
+            f"[{fetcher.source}] found={stats['found']} fetched={stats['fetched']} "
+            f"new={stats['new']} ingested={ingested} failed={stats['failed']}"
+        )
 
     print(f"\nTotal ingested: {total}")
     await conn.close()

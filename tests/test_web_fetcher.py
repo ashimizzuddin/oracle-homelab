@@ -76,9 +76,7 @@ class TestRegistry:
 
     def test_unknown_board_skipped(self, tmp_path):
         cfg_file = tmp_path / "fetchers.yaml"
-        cfg_file.write_text(
-            "boards:\n  - name: unknownboard\n    base_url: https://x\n"
-        )
+        cfg_file.write_text("boards:\n  - name: unknownboard\n    base_url: https://x\n")
         configs = load_fetcher_configs(cfg_file)
         assert configs == []
 

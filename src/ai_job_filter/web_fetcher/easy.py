@@ -46,7 +46,9 @@ class TalenticsFetcher(BaseFetcher):
 
     async def fetch_listing(self) -> list[dict[str, str]]:
         # Try the documented API path first (may become public again)
-        body = await self.http_get(f"{self.config.base_url}{self.config.options.get('api_path', '/v2/jobs')}")
+        body = await self.http_get(
+            f"{self.config.base_url}{self.config.options.get('api_path', '/v2/jobs')}"
+        )
         if body and not body.startswith('{"message":"Unauthorized"}'):
             try:
                 data = json.loads(body)
@@ -57,7 +59,12 @@ class TalenticsFetcher(BaseFetcher):
             for j in jobs:
                 slug = str(j.get("id") or j.get("slug") or "")
                 if slug:
-                    out.append({"slug": slug, "url": j.get("url") or f"https://jobs.talentics.id/jobs/{slug}"})
+                    out.append(
+                        {
+                            "slug": slug,
+                            "url": j.get("url") or f"https://jobs.talentics.id/jobs/{slug}",
+                        }
+                    )
             return out
         # Vue SPA: no static listing without a browser. Return empty politely.
         return []
@@ -77,7 +84,9 @@ class TalenticsFetcher(BaseFetcher):
             company="Talentics",
             location=None,
             description=_fallback_body_lines(body),
-            source_text=f"[Hiring] {title} @ Talentics\nURL: {url}\n\n{_fallback_body_lines(body)}"[:8000],
+            source_text=f"[Hiring] {title} @ Talentics\nURL: {url}\n\n{_fallback_body_lines(body)}"[
+                :8000
+            ],
             discovered_at=_now_iso(),
             discovery_query="jobs.talentics.id",
         )
@@ -203,18 +212,20 @@ class DeallsFetcher(SitemapDetailFetcher):
         body = await self.http_get(url)
         if not body:
             return None
-        m = re.search(
-            r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', body, re.DOTALL
-        )
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', body, re.DOTALL)
         if not m:
             return None
         try:
             nd = json.loads(m.group(1))
             queries = nd["props"]["pageProps"]["dehydratedState"]["queries"]
             job = next(
-                (q["state"]["data"] for q in queries
-                 if q.get("queryKey") and "job" in str(q["queryKey"][0])
-                 and isinstance(q.get("state", {}).get("data"), dict)),
+                (
+                    q["state"]["data"]
+                    for q in queries
+                    if q.get("queryKey")
+                    and "job" in str(q["queryKey"][0])
+                    and isinstance(q.get("state", {}).get("data"), dict)
+                ),
                 {},
             )
         except (ValueError, KeyError, IndexError, TypeError):
@@ -249,7 +260,9 @@ class DeallsFetcher(SitemapDetailFetcher):
             discovered_at=_now_iso(),
             published_at=job.get("publishedAt") or job.get("createdAt"),
             workplace_type="unknown",
-            employment_type=str(job.get("employmentType") or job.get("workType") or "unknown").lower(),
+            employment_type=str(
+                job.get("employmentType") or job.get("workType") or "unknown"
+            ).lower(),
             salary_raw=f"{job.get('salaryMin')}-{job.get('salaryMax')}"
             if job.get("salaryMin") and job.get("salaryMax")
             else None,
@@ -328,7 +341,9 @@ class KitaLulusFetcher(SitemapDetailFetcher):
             company=company,
             location=location,
             description=desc[:4000],
-            source_text=f"[Hiring] {title} @ {company}\nLocation: {location or 'N/A'}\n\n{desc}"[:8000],
+            source_text=f"[Hiring] {title} @ {company}\nLocation: {location or 'N/A'}\n\n{desc}"[
+                :8000
+            ],
             discovered_at=_now_iso(),
             discovery_query="kitalulus.com sitemap-jobs",
         )

@@ -3,7 +3,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai_job_filter.config import Settings
-from ai_job_filter.db.repository import Repository
 from ai_job_filter.telegram.notifier import TelegramNotifier
 
 

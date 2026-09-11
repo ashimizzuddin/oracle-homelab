@@ -29,9 +29,7 @@ class Scorer:
     )
 
     # PRD F-SCO-2: accept both hyphenated and non-hyphenated workplace types
-    VALID_WORKPLACE_TYPES: frozenset[str] = frozenset(
-        {"remote", "hybrid", "onsite", "on-site"}
-    )
+    VALID_WORKPLACE_TYPES: frozenset[str] = frozenset({"remote", "hybrid", "onsite", "on-site"})
 
     def score_job(self, job: JobExtractionResult) -> tuple[int, Classification, str | None]:
         # 1. Hard fail checks

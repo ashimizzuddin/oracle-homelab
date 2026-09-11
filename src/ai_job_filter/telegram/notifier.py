@@ -236,7 +236,9 @@ class TelegramNotifier:
 
         if self.dry_run:
             print("\n" + "=" * 40)
-            print(f"[DRY RUN] Would send notification (score={score}, class={classification}, ParseMode: HTML):")
+            print(
+                f"[DRY RUN] Would send notification (score={score}, class={classification}, ParseMode: HTML):"
+            )
             print(msg)
             print("Buttons: [Apply] [Save] [Skip]")
             print("=" * 40 + "\n")

@@ -95,7 +95,9 @@ class TelegramListener:
             except Exception as e:
                 logger.error("Error in real-time handler", error=str(e))
 
-    async def _handle_notification(self, result, raw_text: str = "", source_id: int | None = None, msg_id: int | None = None):
+    async def _handle_notification(
+        self, result, raw_text: str = "", source_id: int | None = None, msg_id: int | None = None
+    ):
         if not result:
             return
         job_id, job_dict, classification = result
@@ -120,14 +122,18 @@ class TelegramListener:
                 if job:
                     # job row now contains full job data (SELECT *) including match_score
                     job_dict["match_score"] = job["match_score"]
-                    job_dict["application_url"] = job_dict.get("application_url") or job["application_url"]
+                    job_dict["application_url"] = (
+                        job_dict.get("application_url") or job["application_url"]
+                    )
                     job_dict["summary"] = job_dict.get("summary") or job["summary"]
                 else:
                     # Fallback: try fetching by job_id again
                     job_row = await self.db_repo.get_job(job_id)
                     if job_row:
                         job_dict["match_score"] = job_row["match_score"]
-                        job_dict["application_url"] = job_dict.get("application_url") or job_row["application_url"]
+                        job_dict["application_url"] = (
+                            job_dict.get("application_url") or job_row["application_url"]
+                        )
                         job_dict["summary"] = job_dict.get("summary") or job_row["summary"]
 
                 # Fetch source metadata for building t.me links (F-NOT-1 fix)

@@ -63,7 +63,9 @@ async def ingest_candidate(db_repo, candidate: RawCandidate, scorer) -> int | No
     return msg_id
 
 
-async def run_fetcher_once(db_repo, extractor, scorer, fetcher, dry_run: bool, limit: int | None = None):
+async def run_fetcher_once(
+    db_repo, extractor, scorer, fetcher, dry_run: bool, limit: int | None = None
+):
     """One fetcher pass: fetch -> extract -> score -> persist."""
     stats = await fetcher.run(dry_run=dry_run, limit=limit)
     candidates = getattr(fetcher, "last_candidates", [])
@@ -127,7 +129,9 @@ async def run_fetcher_once(db_repo, extractor, scorer, fetcher, dry_run: bool, l
     return stats, ingested
 
 
-async def web_scheduler(db_repo, extractor, scorer, config, notifier=None, run_hour: int = DEFAULT_RUN_HOUR):
+async def web_scheduler(
+    db_repo, extractor, scorer, config, notifier=None, run_hour: int = DEFAULT_RUN_HOUR
+):
     """Daily loop at run_hour. Cancel-safe."""
     from ..config import Settings  # noqa: F401 — typing only
 

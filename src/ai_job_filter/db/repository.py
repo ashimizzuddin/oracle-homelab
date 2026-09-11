@@ -18,8 +18,10 @@ class Repository:
         source_type: str = "CHANNEL",
         username: str | None = None,
     ) -> int:
-        async with self.write_lock, self.conn.execute(
-            """
+        async with (
+            self.write_lock,
+            self.conn.execute(
+                """
                 INSERT INTO sources (telegram_id, title, source_type, username)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(telegram_id) DO UPDATE SET
@@ -28,8 +30,9 @@ class Repository:
                     updated_at=datetime('now')
                 RETURNING id
                 """,
-            (telegram_id, title, source_type, username),
-        ) as cursor:
+                (telegram_id, title, source_type, username),
+            ) as cursor,
+        ):
             row = await cursor.fetchone()
             await self.conn.commit()
             if row and row["id"]:
@@ -129,7 +132,9 @@ class Repository:
         ) as cursor:
             return await cursor.fetchone()
 
-    async def find_message_by_dhash(self, dhash: str, max_distance: int = 12) -> list[aiosqlite.Row]:
+    async def find_message_by_dhash(
+        self, dhash: str, max_distance: int = 12
+    ) -> list[aiosqlite.Row]:
         """Fetch candidate rows for perceptual image dedup.
 
         Uses a coarse bit-prefix prefilter on the dhash hex string to avoid a
@@ -189,9 +194,10 @@ class Repository:
             await self.conn.commit()
 
     async def get_message(self, message_id: int) -> aiosqlite.Row | None:
-        async with self.write_lock, self.conn.execute(
-            "SELECT * FROM messages WHERE id = ?", (message_id,)
-        ) as cursor:
+        async with (
+            self.write_lock,
+            self.conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)) as cursor,
+        ):
             return await cursor.fetchone()
 
     async def get_job_by_message_id(self, message_id: int) -> aiosqlite.Row | None:
@@ -202,9 +208,7 @@ class Repository:
 
     async def get_source(self, source_id: int) -> aiosqlite.Row | None:
         """Fetch source metadata (telegram_id, username) for building t.me links."""
-        async with self.conn.execute(
-            "SELECT * FROM sources WHERE id = ?", (source_id,)
-        ) as cursor:
+        async with self.conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)) as cursor:
             return await cursor.fetchone()
 
     async def update_job(self, job_id: int, **kwargs) -> None:
@@ -212,7 +216,6 @@ class Repository:
             return
 
         async with self.write_lock:
-
             protected = {"id", "message_id", "source_id", "content_hash"}
             update_cols = {k: v for k, v in kwargs.items() if k not in protected}
 

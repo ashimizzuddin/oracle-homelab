@@ -51,7 +51,11 @@ class GlintsFetcher(SitemapDetailFetcher):
                     props = nd.get("props", {}).get("pageProps", {})
                     job = props.get("jobDetail") or props.get("opportunity") or {}
                     title = (job.get("title") or job.get("name") or "").strip()
-                    company = (job.get("company") or {}).get("name", "") if isinstance(job.get("company"), dict) else ""
+                    company = (
+                        (job.get("company") or {}).get("name", "")
+                        if isinstance(job.get("company"), dict)
+                        else ""
+                    )
                     desc = strip_html(job.get("description") or "")
                 except ValueError:
                     pass
