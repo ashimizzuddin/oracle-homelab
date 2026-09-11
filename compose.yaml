@@ -4,6 +4,9 @@ services:
     image: ai-job-filter:latest
     container_name: ai-job-filter
     restart: unless-stopped
+    # Run as the host's ubuntu user (uid/gid 1001) so files written into the
+    # mounted volumes keep ubuntu ownership — the systemd fallback stays usable.
+    user: "1001:1001"
     env_file:
       - .env
     volumes:
