@@ -29,7 +29,7 @@ services:
     volumes:
       - uptime-kuma-data:/app/data
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     logging:
       driver: json-file
       options:
