@@ -16,7 +16,7 @@ This application monitors specified Telegram groups and channels for job posting
 - **Notification**: Telegram Bot API (duplicate-job alerts suppressed; rows kept as audit trail)
 
 ## Current Status
-**PRODUCTION — Running as Docker container on Oracle VPS (ARM64).** Core pipeline (detection → dedup → extraction → scoring → notification) is working, covered by a test suite. Web scheduler ingests 8 job boards daily at 07:00 (talentics, dealls, techinasia, kitalulus, glints, kalibrr, karircom, topkarir). Telegram listener monitors `@LowonganKerjaIT`, `@joinkerjatalenthub`, `@devopsindonesia` in real-time.
+**PRODUCTION — Running as Docker container on Oracle VPS (ARM64).** Core pipeline (detection → dedup → extraction → scoring → notification) is working, covered by a test suite. Web scheduler ingests the 4 healthy job boards daily at 07:00 (dealls, kitalulus, techinasia, talentics); 4 further boards are disabled with a documented reason (see `config/web_fetchers.yaml`). Non-IT postings are rejected by `web_fetcher/relevance.py` before they reach the database. Telegram listener monitors `@LowonganKerjaIT`, `@joinkerjatalenthub`, `@devopsindonesia` in real-time.
 
 CI pushes a new `ghcr.io/ashimizzuddin/ai-job-filter:latest` image on every merge to `main`.
 

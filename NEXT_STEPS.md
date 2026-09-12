@@ -35,12 +35,43 @@ docker compose up -d --build
 
 ## Next (Fase 3 — GitHub Actions CI/CD)
 
-- [ ] `.github/workflows/ci.yml`: ruff + pytest ARM di setiap push
-- [ ] Build image ARM via `docker buildx` di CI
-- [ ] Badge status di README
+✅ **SELESAI** — `.github/workflows/ci.yml`: ruff + pytest ARM, build image ARM64, push ke GHCR, badge di README.
 
 ## Housekeeping
 
-- Prune mingguan: `~/docker-prune.sh` (cron Minggu 03:30 UTC)
-- Log: `docker compose logs -f --tail=50`
-- Backup DB: `~/backups/` (snapshot pre-Docker tersedia)
+Prune mingguan: `~/docker-prune.sh` (cron Minggu 03:30 UTC)
+Log: `docker compose logs -f --tail=50`
+Backup DB: `~/backups/` (snapshot pre-Docker + pre-refilter tersedia)
+
+---
+
+## 2026-09-12 — Pembersihan data non-IT
+
+**Masalah:** 65% tabel `jobs` bukan lowongan IT. `dealls` dan `kitalulus` memakai
+sitemap seluruh-situs tanpa dimensi kategori, dan kode mengambil 25 URL pertama
+dari ~2496 URL — jadi yang masuk adalah 25 lowongan acak.
+
+**Akar tambahan:** key `options.category_path`, `options.specialization`, dan
+`options.keywords` di `config/web_fetchers.yaml` **tidak pernah dibaca kode mana pun** —
+setting kategori itu hanya dekorasi.
+
+**Perbaikan:**
+- `src/ai_job_filter/web_fetcher/relevance.py` — classifier IT tanpa LLM (0 biaya kuota)
+- `BaseFetcher.run()` menerapkan filter via flag `it_only` (default true)
+- `max_items` sekarang batas kandidat DITERIMA, bukan jumlah fetch mentah
+- `scripts/refilter_web_jobs.py` — bersihkan data lama, tidak menghapus apa pun
+- kitalulus: jalan melalui 4 dari 148 sitemap per run dengan kursor rotasi
+
+**Hasil di produksi:** 531 dari 579 baris web ditandai IGNORE. Sisa 48 lowongan IT.
+Data 890 baris tetap utuh (bisa dibalik).
+
+**Board dinonaktifkan** (diprobe live, semuanya menghasilkan 0):
+`glints` (sitemap 404 + SPA), `kalibrr` (URL 404), `karircom` (shell JS 4.6 KB),
+`topkarir` (timeout).
+
+**Rollback:**
+```bash
+git revert <sha>
+docker compose up -d --build
+# DB: pakai snapshot di ~/ai-job-filter/backups/jobs-pre-refilter-*.db
+```
