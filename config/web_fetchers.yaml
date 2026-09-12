@@ -3,15 +3,72 @@
 # (robots/ToS — see docs/PRD-v1.0.md section 3).
 #
 # tier: easy (HTTP/sitemap/API) | medium (HTML parsing, JS-adjacent)
+#
+# it_only (default true):
+#   Reject non-IT postings BEFORE they reach the DB, using
+#   web_fetcher/relevance.py. Boards whose sitemap covers a whole site
+#   (dealls, kitalulus) MUST keep this on, otherwise every category
+#   (housekeeping, personal trainer, medical rep, ...) lands in `jobs`.
+#
+# attempt_multiplier (default 3):
+#   max_items counts ACCEPTED (IT-relevant) candidates, so a whole-site
+#   sitemap needs several attempts per accepted posting. This caps total
+#   detail fetches at max_items * multiplier.
+#
+# options.* — these keys ARE read (via relevance.category_hint and the
+# fetcher classes): sitemap, listing_path, search_path, keywords,
+# specialization, api_path. Unknown keys are ignored.
+#
+# Board health as of 2026-09-12 (probed live from the VPS):
+#   dealls     OK   sitemap 2496 /loker/ URLs
+#   kitalulus  OK   148 job-detail sitemaps (code used to read only the first)
+#   techinasia sitemap 403 for datacenter IPs -> 0 found
+#   glints     sitemap.xml 404, listing page is a JS SPA -> DISABLED
+#   kalibrr    /c/teknologi-dan-startup/jobs 404 (category retired) -> DISABLED
+#   karircom   search page returns a 4.6 KB JS shell -> DISABLED
+#   topkarir   listing page times out from our IP -> DISABLED
+#   talentics  API requires auth (401) -> finds nothing
+#   loker.id   403 for our UA -> DISABLED
+#   hiredtoday sitemap 404 (stale) -> DISABLED
 
 defaults:
   interval_hours: 24
   delay_seconds: 3.0
   max_items: 20
   use_playwright: false
+  it_only: true
+  attempt_multiplier: 3
 
 boards:
-  # ---------------- Easy tier (6) ----------------
+  # ---------------- Easy tier ----------------
+  - name: dealls
+    base_url: https://dealls.com
+    tier: easy
+    max_items: 25
+    attempt_multiplier: 6
+    options:
+      sitemap: /sitemap-dynamic.xml
+      # Kept as a hint only: the sitemap has no category dimension, so the
+      # IT filter (it_only) is what actually keeps this board clean.
+      category_path: /en/jobs?category=information-technology
+
+  - name: kitalulus
+    base_url: https://kitalulus.com
+    tier: easy
+    max_items: 25
+    attempt_multiplier: 6
+    options:
+      sitemap: /sitemap.xml
+      # Code now walks every job-detail-N.xml, so this is a hint, not a cap.
+      specialization: teknologi-informasi
+
+  - name: techinasia
+    base_url: https://www.techinasia.com
+    tier: easy
+    max_items: 20
+    options:
+      sitemap: /sitemaps/jobs/sitemap.xml
+
   - name: talentics
     base_url: https://api.talentics.id
     tier: easy
@@ -29,29 +86,6 @@ boards:
       sitemap: /sitemap.xml
       detail_prefix: /en/jobs-detail/
 
-  - name: dealls
-    base_url: https://dealls.com
-    tier: easy
-    max_items: 25
-    options:
-      sitemap: /sitemap.xml
-      category_path: /en/jobs?category=information-technology
-
-  - name: techinasia
-    base_url: https://www.techinasia.com
-    tier: easy
-    max_items: 20
-    options:
-      sitemap: /sitemaps/jobs/sitemap.xml
-
-  - name: kitalulus
-    base_url: https://kitalulus.com
-    tier: easy
-    max_items: 25
-    options:
-      sitemap: /sitemap.xml
-      specialization: teknologi-informasi
-
   - name: lokerid
     base_url: https://www.loker.id
     tier: easy
@@ -60,26 +94,34 @@ boards:
     options:
       listing_path: /lowongan-kerja/teknologi-informasi
 
-  # ---------------- Medium tier (4 boards, 5 entries) ----------------
+  # ---------------- Medium tier ----------------
+  # NOTE: the three boards below were disabled on 2026-09-12 after a live
+  # probe showed they return no parseable listings at all (see header).
+  # Keeping them enabled only burned ~6 s of delay per run and filled
+  # fetcher_state with "ok / found 0" rows that hid the failure.
+
   - name: glints
     base_url: https://glints.com
     tier: medium
+    enabled: false  # /sitemap.xml 404 + listing page is a JS SPA
     max_items: 25
     options:
+      sitemap: /sitemap.xml
       listing_path: /id/lowongan-kerja?kategori=teknologi
       # NOTE: robots.txt Disallow /api/* — we parse HTML/__NEXT_DATA__ only.
 
   - name: kalibrr
     base_url: https://www.kalibrr.id
     tier: medium
+    enabled: false  # /c/teknologi-dan-startup/jobs returns 404
     max_items: 20
     options:
       search_path: /c/teknologi-dan-startup/jobs
-      # Search page only; detail pages may 403 datacenter IPs — skip detail.
 
   - name: karircom
     base_url: https://www.karir.com
     tier: medium
+    enabled: false  # search page is a 4.6 KB JS shell (no server-rendered links)
     max_items: 15
     options:
       search_path: /search?q=teknologi+informasi
@@ -88,6 +130,7 @@ boards:
   - name: topkarir
     base_url: https://www.topkarir.com
     tier: medium
+    enabled: false  # listing page times out from a datacenter IP
     max_items: 15
     options:
       search_path: /lowongan

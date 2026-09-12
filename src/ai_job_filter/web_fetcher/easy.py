@@ -291,8 +291,12 @@ class KitaLulusFetcher(SitemapDetailFetcher):
 
     source = "kitalulus"
 
+    # How many job-detail sitemaps to walk per run. The index holds 148 of
+    # them (~200 URLs each); reading only the first one capped this board at
+    # a few hundred slugs and made "199 skipped" the normal outcome.
+    SITEMAPS_PER_RUN = 4
+
     async def fetch_listing(self) -> list[dict[str, str]]:
-        # Find the first job-detail sitemap and use it (rotating via state)
         body = await self.http_get(f"{self.config.base_url}/sitemap.xml")
         if not body:
             return []
@@ -307,13 +311,40 @@ class KitaLulusFetcher(SitemapDetailFetcher):
         ]
         if not job_sitemaps:
             return []
-        urls = await self._sitemap_urls(job_sitemaps[0], depth=1)
+
+        # Rotate through the index across runs so the whole board is covered
+        # over time instead of re-reading the same first page every day.
+        start = 0
+        if self.db_repo:
+            try:
+                prev = await self.db_repo.get_fetcher_stats(self.source)
+                start = int(prev.get("sitemap_index", 0)) % len(job_sitemaps)
+            except Exception:
+                start = 0
+
+        ordered = job_sitemaps[start:] + job_sitemaps[:start]
+        selected = ordered[: self.SITEMAPS_PER_RUN]
+
+        urls: list[str] = []
+        for sitemap in selected:
+            urls.extend(await self._sitemap_urls(sitemap, depth=1))
+
         out = []
-        for url in urls[:200]:
-            if "/lowongan/detail/" in url:
-                slug = url.rstrip("/").rsplit("/", 1)[-1]
-                out.append({"slug": slug, "url": url})
+        seen_in_batch: set[str] = set()
+        for url in urls:
+            if "/lowongan/detail/" not in url:
+                continue
+            slug = url.rstrip("/").rsplit("/", 1)[-1]
+            if slug in seen_in_batch:
+                continue
+            seen_in_batch.add(slug)
+            out.append({"slug": slug, "url": url})
+
+        self.last_listing_cursor = (start + self.SITEMAPS_PER_RUN) % len(job_sitemaps)
         return out
+
+    def listing_stats_extra(self) -> dict:
+        return {"sitemap_index": getattr(self, "last_listing_cursor", 0)}
 
     async def fetch_detail(self, url: str) -> RawCandidate | None:
         body = await self.http_get(url)

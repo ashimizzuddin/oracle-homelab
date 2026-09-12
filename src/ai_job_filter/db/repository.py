@@ -250,6 +250,25 @@ class Repository:
             slugs = []
         return slugs, row["last_run_at"]
 
+    async def get_fetcher_stats(self, source: str) -> dict:
+        """Return the last run's stats dict for a fetcher source.
+
+        Used for cross-run cursors (e.g. which sitemap page to start from).
+        """
+        import json
+
+        async with self.conn.execute(
+            "SELECT stats FROM fetcher_state WHERE source = ?", (source,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return {}
+        try:
+            data = json.loads(row["stats"] or "{}")
+        except (ValueError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
     async def save_fetcher_state(
         self, source: str, seen_slugs: list[str], status: str = "ok", stats: dict | None = None
     ) -> None:

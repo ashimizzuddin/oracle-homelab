@@ -19,7 +19,15 @@ from typing import Any
 
 import structlog
 
+from .relevance import category_hint as _category_hint
+from .relevance import classify_reason, is_it_job
+
 logger = structlog.get_logger()
+
+# Bump when the IT classifier changes: filtered slugs are keyed by version,
+# so a bump re-evaluates everything the previous version rejected.
+IT_FILTER_VERSION = "it-v1"
+FILTERED_PREFIX = "__filtered__:"
 
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -43,6 +51,14 @@ class FetcherConfig:
     max_items: int = 20
     use_playwright: bool = False
     options: dict[str, Any] = field(default_factory=dict)
+    # Boards whose sitemap covers the whole site must not store non-IT rows:
+    # before this flag existed, Dealls and KitaLulus were storing every
+    # category (housekeeping, personal trainer, ...) into the jobs table.
+    it_only: bool = True
+    # Hard cap on detail fetches as a multiple of max_items. Needed because
+    # ``max_items`` counts ACCEPTED candidates, while a whole-site sitemap
+    # may need many attempts before finding enough IT postings.
+    attempt_multiplier: int = 3
 
 
 @dataclass
@@ -126,6 +142,56 @@ class BaseFetcher(ABC):
         jitter = random.uniform(0.5, 1.5)
         await asyncio.sleep(self.config.delay_seconds * jitter)
 
+    # -- relevance filtering ----------------------------------------------
+
+    def category_hint(self) -> str:
+        """Extra search terms from this board's ``options`` block.
+
+        Makes the previously-dead ``keywords`` / ``category_path`` /
+        ``specialization`` keys meaningful.
+        """
+        return _category_hint(self.config.options)
+
+    def listing_stats_extra(self) -> dict:
+        """Extra stats keys a board wants persisted in ``fetcher_state.stats``.
+
+        Overridden by boards that keep a cross-run cursor.
+        """
+        return {}
+
+    @staticmethod
+    def it_filter_version() -> str:
+        """Marker stored alongside filtered slugs.
+
+        Bump when the classifier changes so previously-filtered postings are
+        re-evaluated instead of being skipped forever.
+        """
+        return IT_FILTER_VERSION
+
+    @classmethod
+    def _filtered_key(cls, slug: str) -> str:
+        """Key for a slug rejected by the IT filter at the CURRENT version.
+
+        The version is part of the key, so bumping ``IT_FILTER_VERSION``
+        makes every previously-filtered slug eligible again.
+        """
+        return f"{FILTERED_PREFIX}{IT_FILTER_VERSION}:{slug}"
+
+    @staticmethod
+    def _is_filtered_key(slug: str) -> bool:
+        return slug.startswith(FILTERED_PREFIX)
+
+    @classmethod
+    def _prune_old_filtered_keys(cls, slugs: list[str]) -> list[str]:
+        """Drop filtered markers from previous versions (they are stale)."""
+        prefix = f"{FILTERED_PREFIX}{IT_FILTER_VERSION}:"
+        out = []
+        for s in slugs:
+            if cls._is_filtered_key(s) and not s.startswith(prefix):
+                continue
+            out.append(s)
+        return out
+
     # -- board-specific hooks -------------------------------------------
 
     @abstractmethod
@@ -139,8 +205,14 @@ class BaseFetcher(ABC):
     # -- orchestration ---------------------------------------------------
 
     async def run(self, dry_run: bool = True, limit: int | None = None) -> dict:
-        """One daily pass: listing -> new only -> detail -> candidates."""
-        stats = {"found": 0, "new": 0, "fetched": 0, "failed": 0, "skipped": 0}
+        """One daily pass: listing -> new only -> detail -> candidates.
+
+        ``max_items`` bounds ACCEPTED candidates (IT-relevant ones after
+        filtering), not raw fetches, so a whole-site sitemap still yields a
+        useful batch. ``attempt_multiplier`` bounds total detail fetches so
+        the run cannot crawl all day.
+        """
+        stats = {"found": 0, "new": 0, "fetched": 0, "failed": 0, "skipped": 0, "filtered": 0}
         seen: set[str] = set()
 
         if self.db_repo:
@@ -157,19 +229,31 @@ class BaseFetcher(ABC):
             return stats
 
         stats["found"] = len(listings)
+        # Boards with their own cross-run cursor (e.g. which sitemap page to
+        # resume from) contribute extra keys here.
+        stats.update(self.listing_stats_extra())
         max_items = limit or self.config.max_items
+        max_attempts = max(max_items, max_items * max(1, self.config.attempt_multiplier))
+        hint = self.category_hint() if self.config.it_only else ""
+        it_only = bool(self.config.it_only)
+        marker = self.it_filter_version() if it_only else ""
 
         candidates: list[RawCandidate] = []
+        attempts = 0
         for item in listings:
             slug = item.get("slug", "")
             url = item.get("url", "")
-            if not url or slug in seen:
+            # Skip already-ingested slugs and slugs the CURRENT filter version
+            # already rejected (older-version markers are pruned, so they get
+            # re-evaluated).
+            if not url or slug in seen or self._filtered_key(slug) in seen:
                 stats["skipped"] += 1
                 continue
-            if stats["fetched"] >= max_items:
+            if len(candidates) >= max_items or attempts >= max_attempts:
                 break
 
             await self.polite_delay()
+            attempts += 1
             try:
                 candidate = await self.fetch_detail(url)
             except Exception as e:
@@ -178,15 +262,31 @@ class BaseFetcher(ABC):
                 continue
 
             stats["fetched"] += 1
-            if candidate:
-                candidates.append(candidate)
-                seen.add(slug)
-                stats["new"] += 1
+            if not candidate:
+                continue
+
+            if it_only and not is_it_job(candidate.title, candidate.description, hint=hint):
+                reason = classify_reason(candidate.title, candidate.description, hint=hint)
+                seen.add(self._filtered_key(slug))
+                stats["filtered"] += 1
+                logger.info(
+                    "Filtered non-IT candidate",
+                    source=self.source,
+                    title=candidate.title,
+                    reason=f"{marker}: {reason}",
+                )
+                continue
+
+            candidates.append(candidate)
+            seen.add(slug)
+            stats["new"] += 1
 
         # Persist state even in dry_run so repeated dry-runs don't refetch?
         # No: dry_run must not mutate state (mirrors ingest semantics).
         if self.db_repo and not dry_run:
-            await self.db_repo.save_fetcher_state(self.source, sorted(seen), "ok", stats)
+            await self.db_repo.save_fetcher_state(
+                self.source, sorted(self._prune_old_filtered_keys(sorted(seen))), "ok", stats
+            )
 
         logger.info("Fetcher run complete", source=self.source, dry_run=dry_run, **stats)
         self.last_candidates = candidates

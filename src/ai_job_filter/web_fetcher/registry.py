@@ -56,6 +56,10 @@ def load_fetcher_configs(config_path: Path | None = None) -> list[FetcherConfig]
             max_items=int(board.get("max_items", defaults.get("max_items", 20))),
             use_playwright=bool(board.get("use_playwright", defaults.get("use_playwright", False))),
             options=board.get("options") or {},
+            it_only=bool(board.get("it_only", defaults.get("it_only", True))),
+            attempt_multiplier=int(
+                board.get("attempt_multiplier", defaults.get("attempt_multiplier", 3))
+            ),
         )
         configs.append(cfg)
     return configs
